@@ -1,8 +1,9 @@
 import { analyseMono, detectBeats, downmix, type TrackAnalysis } from './analysis';
 import { FileFeed, LiveFeed, type FeatureSource } from './features';
+import liveWorkletUrl from './live.worklet.ts?worker&url';
 import type { BeatSettings } from '../state/project';
 
-export type Origin = 'demo' | 'file' | 'spotify' | 'soundcloud' | 'mic' | 'tab';
+export type Origin = 'demo' | 'file' | 'soundcloud' | 'mic' | 'tab';
 
 export interface TrackInfo {
   title: string;
@@ -48,6 +49,10 @@ export class AudioEngine {
   private stream: MediaStream | null = null;
   private streamNode: MediaStreamAudioSourceNode | null = null;
   private liveStart = 0;
+  private workletLoaded = false;
+  private liveNodes: AudioNode[] = [];
+  /** User A/V offset in ms: positive delays the picture. Device-specific, so not part of a project. */
+  syncMs = 0;
   private listeners = new Map<Evt, Set<(arg?: unknown) => void>>();
   private loadToken = 0;
 
@@ -88,7 +93,25 @@ export class AudioEngine {
     if (this.external) return this.external.time();
     if (this.stream) return this._playing ? (performance.now() - this.liveStart) / 1000 : this.pausedAt;
     if (!this._playing) return this.pausedAt;
-    return this.startOffset + (this.ctx.currentTime - this.startCtx);
+    return Math.max(this.startOffset - 0.25, this.startOffset + (this.audibleTime() - this.startCtx)) - this.syncMs / 1000;
+  }
+
+  /**
+   * Context time of the sample reaching the speakers right now. currentTime runs
+   * ahead of what you hear by the output latency (large on Bluetooth), so the
+   * picture is synced to the output timestamp instead.
+   */
+  private audibleTime(): number {
+    const ts = this.ctx.getOutputTimestamp?.();
+    if (ts && ts.contextTime !== undefined && ts.performanceTime !== undefined && ts.contextTime > 0) {
+      return ts.contextTime + Math.max(0, (performance.now() - ts.performanceTime) / 1000);
+    }
+    return this.ctx.currentTime - (this.ctx.outputLatency || this.ctx.baseLatency || 0);
+  }
+
+  /** Output latency in ms, for display. */
+  get latencyMs(): number {
+    return Math.round(((this.ctx.outputLatency || 0) + (this.ctx.baseLatency || 0)) * 1000);
   }
 
   async resume(): Promise<void> {
@@ -109,6 +132,8 @@ export class AudioEngine {
     }
     this.streamNode?.disconnect();
     this.streamNode = null;
+    for (const n of this.liveNodes) n.disconnect();
+    this.liveNodes = [];
     this.liveFeed = null;
     this.buffer = null;
     this.mono = null;
@@ -202,10 +227,8 @@ export class AudioEngine {
     this.external = keepExternal;
     if (keepExternal) this.overview = keepOverview;
     this.stream = stream;
-    const analyser = this.ctx.createAnalyser();
     this.streamNode = this.ctx.createMediaStreamSource(stream);
-    this.streamNode.connect(analyser);
-    this.liveFeed = new LiveFeed(analyser, beat);
+    this.liveFeed = await this.makeLiveFeed(this.streamNode, beat);
     this.feed = this.liveFeed;
     this.info =
       opts.info ??
@@ -221,12 +244,38 @@ export class AudioEngine {
     this.emit('state');
   }
 
+  /** Live analysis on the audio thread; falls back to an AnalyserNode. */
+  private async makeLiveFeed(src: AudioNode, beat: BeatSettings): Promise<LiveFeed> {
+    try {
+      if (!this.workletLoaded) {
+        await this.ctx.audioWorklet.addModule(liveWorkletUrl);
+        this.workletLoaded = true;
+      }
+      const node = new AudioWorkletNode(this.ctx, 'klangbild-live', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+      src.connect(node);
+      // A silent path to the output keeps the node processing.
+      const mute = this.ctx.createGain();
+      mute.gain.value = 0;
+      node.connect(mute).connect(this.ctx.destination);
+      this.liveNodes = [node, mute];
+      return new LiveFeed({ kind: 'worklet', port: node.port }, beat);
+    } catch (err) {
+      console.warn('Live analysis worklet unavailable, using AnalyserNode', err);
+      const analyser = this.ctx.createAnalyser();
+      src.connect(analyser);
+      this.liveNodes = [analyser];
+      return new LiveFeed({ kind: 'analyser', analyser }, beat);
+    }
+  }
+
   stopLive(): void {
     if (!this.stream) return;
     this.stream.getTracks().forEach((t) => t.stop());
     this.stream = null;
     this.streamNode?.disconnect();
     this.streamNode = null;
+    for (const n of this.liveNodes) n.disconnect();
+    this.liveNodes = [];
     this.liveFeed = null;
     this.feed = null;
     if (!this.external) {
@@ -240,7 +289,7 @@ export class AudioEngine {
     return !!this.stream;
   }
 
-  /** Attach an embedded player (Spotify / SoundCloud) as the transport. */
+  /** Attach an embedded player (SoundCloud widget) as the transport. */
   attachExternal(transport: ExternalTransport, info: TrackInfo): void {
     this.teardown();
     this.external = transport;

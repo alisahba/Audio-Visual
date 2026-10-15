@@ -1,6 +1,6 @@
 # Klangbild
 
-An audio-reactive abstract visual instrument for the web. Load a track, pick the part of the song you want, shape how the sound drives colour, motion and texture, and export MP4 or PNG/JPEG sequences.
+An audio-reactive abstract visual instrument for the web. Load a track, pick the part of the song you want, shape how the sound drives colour, motion and texture, paint your own images, video or camera into it, and export MP4 or PNG/JPEG sequences.
 
 The interface follows the International Typographic Style: a strict grid, hairline rules, one sans-serif family, numbered sections and a single red accent.
 
@@ -23,20 +23,39 @@ The panels are numbered in signal-flow order:
 
 | | Section | What it does |
 |---|---|---|
-| 01 | **Source** | A local audio file (fully analysed), a Spotify or SoundCloud track (played in their official players), or live input (microphone, a browser tab, or the whole system). |
-| 02 | **Response** | Where beats come from and how strongly the sound pushes the picture. Drag the red window over the live spectrum to choose the frequencies that trigger beats (kick, snare, hats or any custom band), or lock beats to the detected tempo. Set the reactivity, low/mid/high gains, attack and release. |
-| 03 | **Emit** | What paints colour in: *Orbs*, *Spectrum* (strata, columns, radial, horizon), *Waveform*, *Beat Ink* (each beat drops a new colour that bleeds outward) and *Cloud*. |
-| 04 | **Motion** | How paint moves: a real *Fluid* simulation, a curl-noise *Flow Field*, directional *Drift* with per-column streaks, and *Zoom / Spin* feedback. They all mix into one velocity field. |
+| 01 | **Source** | A local audio file (fully analysed), a SoundCloud track (search or paste a link), or live input (microphone, a browser tab, or the whole system). |
+| 02 | **Response** | Where beats come from and how strongly the sound pushes the picture. Drag the red window over the live spectrum to choose the frequencies that trigger beats (kick, snare, hats or any custom band), or switch to *Beat track* to lock to the detected tempo (every bar, half, beat, eighth or sixteenth). Set sensitivity, the minimum gap between hits (down to 20 ms), reactivity, low/mid/high gains, attack and release, and an A/V offset. |
+| 03 | **Emit** | What paints colour in: *Orbs*, *Spectrum* (strata, columns, radial, horizon), *Waveform*, *Beat Ink* (each beat drops a new colour that bleeds outward), *Cloud*, and *Media* (your image, video or camera; see below). |
+| 04 | **Motion** | How paint moves: a real *Fluid* simulation with buoyancy, a curl-noise *Flow Field* with detail and lean, directional *Drift* with per-column streaks, hardness and wobble, *Zoom / Spin* with twist around any centre, *Melt* (heavy paint drips in uneven columns) and *Ripple* (each beat sends a ring wave through the paint). They all mix into one velocity field. |
 | 05 | **Time** | *Hold* keeps colour at full strength, then it *fades out* over the time you set, so the canvas never gets overloaded. *Bleed* lets colours diffuse into each other. *Fade in* eases the clip in. |
-| 06 | **Colour** | Five-colour palette and ground colour (or take colours from the track artwork), blend mode, direct / gradient-map / spectral mapping, and when a new colour arrives (every beat, every bar, over time). |
-| 07 | **Post** | Mirror and kaleidoscope, pixel stretch, glitch, RGB split, soft focus, glow, contour lines, dither/halftone, film grain, vignette. |
+| 06 | **Colour** | Five-colour palette and ground colour, built-in palettes plus your own (see below), blend mode, direct / gradient-map / spectral mapping, and when a new colour arrives (every beat, every bar, over time). |
+| 07 | **Post** | Mirror and kaleidoscope, pixel stretch, glitch, *Slices* (the image cut into sliding strips), *Pixelate*, RGB split, soft focus, *Liquid* (soft paint turned into solid shapes with crisp edges), *Sheen* (iridescent film with glowing ridges), glow, contour lines, dither/halftone, film grain, vignette. |
+
+Each section folds away when you're not using it (click its header; Alt-click to keep only that one open), and shows a one-line summary while folded. The strip at the top of the effects column jumps to any section. Each effect card has a reset button.
 
 Every effect has a **drive** chip. Pick Low, Mid, High, Level or Beat and a depth, and that part of the sound modulates the effect's main parameter. A red tick on the slider shows the live, modulated value. Two drives come from time rather than sound, like a time effector:
 
 - **Time** rises steadily from the start to the end of the clip, so a look can build.
 - **Wave** swings slowly every two bars of the track's tempo.
 
-**Presets** (keys 1–8) are starting points modelled on the reference images: *Ember, Capsule, Pastel Melt, Thermal, Marble, Paper Bleed, Halo, Pixel Rain*.
+**Presets** (keys 1–9 and 0) are starting points modelled on the reference images: *Ember, Capsule, Pastel Melt, Thermal, Marble, Paper Bleed, Halo, Pixel Rain, Drip, Liquid Slice, Opal*.
+
+### Small things
+
+- **Double-click a slider's label** to set it to 0; double-click the slider itself to reset it to its default.
+- **Custom palettes**: click a swatch to edit a colour, ⇄ reverses the order, the dice shuffles a new palette, and **Save** keeps the current one with the built-ins (right-click a saved palette to delete it).
+- **Stage** (above the canvas) sets the space around the canvas to white, grey or black, or follows the light/dark theme.
+
+### Images, video and the camera
+
+The **Media** card in *Emit* paints your own material into the canvas, where it is advected, faded and coloured like the rest of the paint, never shown as a plain picture.
+
+- **Image or video**: any image or video file. Video follows the clip, so preview and export match.
+- **Camera**: your webcam, live.
+- **Subject**: *Full frame*, or only the *Body*, *Hands* or *Face*. These are traced in the browser with MediaPipe and drawn as soft abstract shapes (the face with its eyes and mouth cut out, hands as palm and tapered fingers), never as footage. The tracking model (a few MB) downloads from Google the first time you use it; the frames stay on your machine.
+- **Look**: mapped onto the *Palette*, *Tint*ed, a single *Ink* colour, or the *Original* colours. **Paint** sets whether it flows in all the time or lands on each beat or bar. **Key** drops dark areas, and *Scale*, *Offset* and *Video speed* place it.
+
+Images and video export frame-accurately. The camera is sampled live while an export renders; to capture a performance in real time, use **Record**.
 
 ### Choosing the part of the song
 
@@ -58,22 +77,33 @@ Export renders **offline, frame by frame**, at a fixed 60 Hz simulation step, so
 - **Still**: the frame at the playhead at full resolution. `S` saves a quick snapshot of the preview.
 - **Warm-up** runs the simulation for a moment before the first frame so the clip doesn't open on an empty canvas.
 
-Live, Spotify and SoundCloud sources can't be rendered offline, because their audio only exists while it plays. For those, **Record** captures the canvas in real time to MP4 (video only).
+Live input and the SoundCloud player can't be rendered offline, because their audio only exists while it plays. For those, **Record** captures the canvas in real time to MP4 (video only). SoundCloud tracks loaded in full mode render offline like a file, but the exported video never includes SoundCloud's audio.
 
-## Spotify and SoundCloud: what is and isn't possible
+## SoundCloud
 
-Neither service lets a web page (or a desktop app) read the audio of its streams.
+There are two ways to use SoundCloud.
 
-- **Spotify** streams are DRM-protected, and the Web API returns metadata only. Its *audio-analysis* and *preview* endpoints were also switched off for new apps in 2024. Spotify's developer terms also forbid syncing its recordings to video. So Klangbild uses Spotify for **search** (your own free developer app, Client ID only, no server needed) and plays the track in the **official Spotify embed**. The visuals then react to the sound by **capturing this browser tab's audio**. Logged out, the embed plays 30-second previews.
-- **SoundCloud** API keys require an approved app and a server to hold the secret. The keyless route used here is: paste a track link, play it in the **official widget**, and capture the tab audio. Klangbild also reads SoundCloud's public waveform for the song strip when it can.
+**Full mode (recommended).** Register an app at [soundcloud.com/you/apps](https://soundcloud.com/you/apps), then paste its **Client ID** and **Client secret** into the SoundCloud tab and press **Connect**. Klangbild gets a token straight from SoundCloud (no server involved; the keys stay in your browser's local storage), and then:
 
-To export a finished video of a song, load the audio file itself (a track you own or have the rights to). You then get full analysis, beat markers, the drop finder and frame-accurate MP4 export with sound.
+- search works inside the app;
+- tracks load as real audio, with the full waveform, beat detection, the drop finder and frame-accurate export (video only, without SoundCloud's audio).
 
-### Spotify search setup (optional, 2 minutes)
+Tracks the uploader has restricted to SoundCloud's own apps show as greyed out. Some tracks only offer a 30-second preview.
 
-1. Go to [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) → **Create app**, tick **Web API**.
-2. Add the Redirect URI shown in the Spotify tab (the address you run Klangbild from, e.g. `http://127.0.0.1:5173/`).
-3. Paste the app's **Client ID** into the Spotify tab and press **Connect**.
+**Player mode (no keys).** Paste a track link. It plays in SoundCloud's **official widget**, and the visuals react by **listening to this browser tab** (press *Listen to this tab* and tick *Share tab audio*). If nothing comes through after a few seconds, Klangbild tells you.
+
+### Beat detection
+
+A file or full-mode track is analysed off the main thread:
+
+- a fine 12-bands-per-octave filterbank;
+- **SuperFlux** onset strength, which ignores vibrato and sustained notes;
+- peak picking with an adaptive threshold, where the stronger hit wins inside the minimum gap;
+- tempo by autocorrelation with a prior around 120 BPM, and a **dynamic-programming beat tracker** with downbeat estimation for *Beat track*.
+
+Live input runs the same detector in an AudioWorklet. Playback compensates for the audio output latency. If your speakers or Bluetooth headphones still feel late, nudge **A/V offset**.
+
+On synthetic test tracks, beat tracking is about 99% accurate and hits land within about 10 ms (`node scripts/eval-beats.sh`).
 
 ## Web or Windows app?
 
@@ -90,7 +120,7 @@ A native Windows build (for example the same code wrapped in Tauri or Electron) 
 - ProRes or alpha-channel exports through FFmpeg;
 - no browser memory limits for very long 4K exports.
 
-It would **not** unlock Spotify or SoundCloud audio, because those limits are DRM and licensing, not the web. If those extras ever matter, the codebase can be wrapped later without a rewrite.
+It would **not** unlock streaming-service audio such as Spotify's, because those limits are DRM and licensing, not the web. If those extras ever matter, the codebase can be wrapped later without a rewrite.
 
 ## Browser support
 
@@ -102,10 +132,11 @@ It would **not** unlock Spotify or SoundCloud audio, because those limits are DR
 | Tab audio capture | ✓ | — | — |
 | System audio capture | ✓ Windows / ChromeOS | — | — |
 | Microphone | ✓ | ✓ | ✓ |
+| Camera, hand / face / body tracking | ✓ | ✓ | ✓ |
 
 ## Shortcuts
 
-`Space` play/pause · `R` back to clip start · `C` clear canvas · `← →` seek (Shift: 5 s) · `E` export · `S` snapshot · `F` fullscreen · `1–8` presets · `Ctrl/Cmd Z` undo (Shift: redo) · Shift-drag a slider for fine control · double-click a slider to reset it.
+`Space` play/pause · `R` back to clip start · `C` clear canvas · `← →` seek (Shift: 5 s) · `E` export · `S` snapshot · `F` fullscreen · `1–9`, `0` presets · `Ctrl/Cmd Z` undo (Shift: redo) · Shift-drag a slider for fine control · double-click a slider to reset it, or its label to set it to 0.
 
 Projects autosave in the browser. Use the save/open icons to keep `.klangbild.json` project files.
 
@@ -113,10 +144,11 @@ Projects autosave in the browser. Use the save/open icons to keep `.klangbild.js
 
 ```
 src/
-  audio/      analysis worker (FFT, 32 log bands, tempo), beat detection, features, engine, demo synth
+  audio/      DSP (filterbank, SuperFlux), analysis worker (tempo, DP beat tracker), live AudioWorklet, beat picking, engine, demo synth
   render/     WebGL2 helpers, shaders, renderer (fluid + paint + post), fixed-step simulation driver
   export/     offline exporter (mediabunny MP4, PNG/JPEG via folder or ZIP) and real-time recorder
-  sources/    Spotify (PKCE search + embed) and SoundCloud (widget)
+  sources/    SoundCloud API (search, resolve, stream decode) and widget player
+  media/      image/video/camera input and MediaPipe hand, face and body tracking
   state/      effect definitions, project model, presets, undo store
-  ui/         panels, controls, timeline, export dialog
+  ui/         foldable sections, panels, controls, timeline, export dialog
 ```

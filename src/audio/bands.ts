@@ -47,11 +47,11 @@ export const RANGE_LOW: [number, number] = [20, 160];
 export const RANGE_MID: [number, number] = [160, 2500];
 export const RANGE_HIGH: [number, number] = [2500, 16000];
 
-export const BEAT_PRESETS: { id: string; label: string; lo: number; hi: number }[] = [
-  { id: 'kick', label: 'Kick', lo: 40, hi: 140 },
-  { id: 'snare', label: 'Snare', lo: 180, hi: 2200 },
-  { id: 'hats', label: 'Hats', lo: 5000, hi: 11000 },
-  { id: 'full', label: 'Full', lo: 30, hi: 11000 },
+export const BEAT_PRESETS: { id: string; label: string; lo: number; hi: number; hold: number }[] = [
+  { id: 'kick', label: 'Kick', lo: 40, hi: 140, hold: 120 },
+  { id: 'snare', label: 'Snare', lo: 180, hi: 2200, hold: 100 },
+  { id: 'hats', label: 'Hats', lo: 5000, hi: 11000, hold: 45 },
+  { id: 'full', label: 'Full', lo: 30, hi: 11000, hold: 80 },
 ];
 
 export function formatHz(hz: number): string {

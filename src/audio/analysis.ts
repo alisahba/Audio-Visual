@@ -1,6 +1,6 @@
-import type { BeatSettings } from '../state/project';
-import { BAND_COUNT, bandsInRange } from './bands';
+import { BAND_COUNT } from './bands';
 import { analyse, type AnalysisResult } from './analysis-core';
+export { beatGrid, detectBeats, noveltyCurve, onsetDelta, pickOnsets } from './beats';
 import AnalysisWorker from './analysis.worker?worker&inline';
 
 export type TrackAnalysis = AnalysisResult;
@@ -59,69 +59,9 @@ export function analyseMono(mono: Float32Array, sampleRate: number, onProgress?:
   });
 }
 
-/** Onset novelty for a frequency window, normalised so its 95th percentile ≈ 1. */
-export function noveltyCurve(an: TrackAnalysis, lo: number, hi: number): Float32Array {
-  const idx = bandsInRange(lo, hi);
-  const n = new Float32Array(an.frames);
-  const B = an.bands;
-  for (let f = 1; f < an.frames; f++) {
-    let a = 0;
-    for (const b of idx) {
-      const cur = B[f * BAND_COUNT + b];
-      const prev = Math.max(B[(f - 1) * BAND_COUNT + b], f > 1 ? B[(f - 2) * BAND_COUNT + b] * 0.9 : 0);
-      const d = cur - prev;
-      if (d > 0) a += d;
-    }
-    n[f] = a / Math.sqrt(idx.length);
-  }
-  // light smoothing
-  const s = new Float32Array(an.frames);
-  for (let f = 0; f < an.frames; f++) s[f] = 0.25 * (n[f - 1] ?? n[f]) + 0.5 * n[f] + 0.25 * (n[f + 1] ?? n[f]);
-  const sorted = Float32Array.from(s).sort();
-  const p = sorted[Math.floor(sorted.length * 0.95)] || 1;
-  for (let f = 0; f < an.frames; f++) s[f] /= p;
-  return s;
-}
-
-/** Beat times (s) for the whole track according to the beat settings. */
-export function detectBeats(an: TrackAnalysis, bs: BeatSettings): Float32Array {
-  if (bs.mode === 'grid') {
-    const period = 60 / an.bpm / Math.max(0.25, bs.division);
-    const out: number[] = [];
-    let t0 = an.phase;
-    // When thinning to bars, start on the strongest downbeat candidate.
-    while (t0 - period >= 0) t0 -= period;
-    for (let t = t0; t < an.duration; t += period) out.push(t);
-    return Float32Array.from(out);
-  }
-  const nov = noveltyCurve(an, bs.lo, bs.hi);
-  const fps = an.fps;
-  const W = Math.max(2, Math.round(fps * 0.4));
-  const prefix = new Float64Array(an.frames + 1);
-  for (let f = 0; f < an.frames; f++) prefix[f + 1] = prefix[f] + nov[f];
-  const s = Math.min(1, Math.max(0, bs.sensitivity));
-  const k = 2.3 - 1.25 * s;
-  const delta = 0.35 - 0.3 * s;
-  const holdFrames = (bs.hold / 1000) * fps;
-  const out: number[] = [];
-  let last = -1e9;
-  for (let f = 2; f < an.frames - 2; f++) {
-    const v = nov[f];
-    if (v < nov[f - 1] || v < nov[f + 1] || v < nov[f - 2] || v < nov[f + 2]) continue;
-    const a = Math.max(0, f - W);
-    const b = Math.min(an.frames, f + W + 1);
-    const mean = (prefix[b] - prefix[a]) / (b - a);
-    if (v > mean * k + delta && f - last >= holdFrames) {
-      out.push(f / fps);
-      last = f;
-    }
-  }
-  return Float32Array.from(out);
-}
-
-/** Linear interpolated read of a per-frame envelope. */
+/** Linear interpolated read of a per-frame envelope (frames are centred at (f + 0.5) / fps). */
 export function readEnv(arr: Float32Array, fps: number, t: number): number {
-  const f = t * fps;
+  const f = t * fps - 0.5;
   if (f <= 0) return arr[0] ?? 0;
   const i = Math.floor(f);
   if (i >= arr.length - 1) return arr[arr.length - 1] ?? 0;
@@ -130,7 +70,7 @@ export function readEnv(arr: Float32Array, fps: number, t: number): number {
 }
 
 export function readBands(an: TrackAnalysis, t: number, out: Float32Array): void {
-  const f = t * an.fps;
+  const f = t * an.fps - 0.5;
   const i = Math.max(0, Math.min(an.frames - 1, Math.floor(f)));
   const j = Math.min(an.frames - 1, i + 1);
   const fr = Math.min(1, Math.max(0, f - i));

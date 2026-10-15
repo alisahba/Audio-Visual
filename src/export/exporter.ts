@@ -12,6 +12,7 @@ import {
 import { Zip, ZipPassThrough } from 'fflate';
 import type { AudioEngine } from '../audio/engine';
 import type { FeatureSource } from '../audio/features';
+import type { MediaExportSource } from '../media/media';
 import { clone, type Project } from '../state/project';
 import { Renderer } from '../render/renderer';
 import { SimDriver } from '../render/sim';
@@ -113,6 +114,7 @@ export async function runExport(
   onProgress: (p: ExportProgress) => void,
   signal: AbortSignal,
   dir?: DirHandle,
+  mediaSrc?: MediaExportSource | null,
 ): Promise<ExportResult> {
   const t0 = performance.now();
   const project = clone(liveProject);
@@ -130,7 +132,11 @@ export async function runExport(
   const clipStart = project.clip.start;
   const base = `${slug(engine.info?.title ?? project.name)}`;
 
+  const setMedia = async (clipTime: number) => {
+    if (mediaSrc) renderer.media = await mediaSrc.frameAt(Math.max(0, clipTime));
+  };
   try {
+    await setMedia(0);
     sim.reset(project, clipStart - opts.preroll, engine.analysis?.bpm ?? 0);
     sim.clipStart = clipStart;
     // Warm up so the first frame isn't an empty canvas.
@@ -148,6 +154,7 @@ export async function runExport(
       const t = clipStart + (opts.stillTime ?? 0);
       let n = 0;
       while (sim.songTime + 1 / 60 <= t + 1e-9) {
+        if (mediaSrc && n % 2 === 0) await setMedia(sim.songTime - clipStart);
         sim.stepOnce(feed, project);
         if (++n % 30 === 0) {
           onProgress({ frame: 0, total: 1, phase: 'warmup', canvas });
@@ -188,6 +195,7 @@ export async function runExport(
       try {
         for (let i = 0; i < total; i++) {
           if (signal.aborted) throw new DOMException('Export cancelled', 'AbortError');
+          await setMedia(i / opts.fps);
           sim.advanceTo(clipStart + i / opts.fps, feed, project);
           sim.render(project);
           await video.add(i / opts.fps, 1 / opts.fps);
@@ -228,6 +236,7 @@ export async function runExport(
     let chain: Promise<void> = Promise.resolve();
     for (let i = 0; i < total; i++) {
       if (signal.aborted) throw new DOMException('Export cancelled', 'AbortError');
+      await setMedia(i / opts.fps);
       sim.advanceTo(clipStart + i / opts.fps, feed, project);
       sim.render(project);
       const name = `${base}_${String(i).padStart(5, '0')}.${ext}`;
@@ -265,6 +274,7 @@ export async function runExport(
     }
     return { name: base, savedTo: dir!.name, frames: total, seconds: (performance.now() - t0) / 1000 };
   } finally {
+    mediaSrc?.dispose();
     renderer.dispose();
   }
 }

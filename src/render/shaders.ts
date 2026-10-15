@@ -212,6 +212,18 @@ void main() {
   o = vec4(v, 0.0, 1.0);
 }`;
 
+export const BUOY_FS = `${HEAD}
+uniform sampler2D uVel;
+uniform sampler2D uDye;
+uniform float uGravity;
+uniform float uDt;
+void main() {
+  vec2 v = texture(uVel, vUv).xy;
+  float d = texture(uDye, vUv).a;
+  v.y += uGravity * d * uDt;
+  o = vec4(v, 0.0, 1.0);
+}`;
+
 export const SCALE_FS = `${HEAD}
 uniform sampler2D uTex;
 uniform float uScale;
@@ -240,9 +252,20 @@ uniform float uLowPrec;
 
 uniform float uFluidAmt;
 uniform vec4 uFlow;
+uniform vec4 uFlow2;
 uniform vec4 uDrift;
+uniform vec4 uDrift2;
 uniform float uDriftCols;
-uniform vec2 uWarp;
+uniform vec4 uWarp;
+uniform vec2 uWarpC;
+uniform vec4 uMelt;
+uniform vec4 uMelt2;
+uniform int uRippleCount;
+uniform vec4 uRipples[4];
+uniform vec2 uRippleP;
+uniform sampler2D uMedia;
+uniform vec4 uMediaXf;
+uniform vec4 uMediaP;
 uniform float uLifeRate;
 uniform float uBleed;
 uniform float uPalOff;
@@ -294,8 +317,13 @@ void main() {
   vec2 vel = texture(uVel, uv).xy * uSimTexel * uFluidAmt;
   if (uFlow.x > 0.0) {
     vec2 c = curlNoise(p * uFlow.y, uTime * uFlow.z + uSeed);
+    if (uFlow2.x > 0.0) c += curlNoise(p * uFlow.y * 2.7 + 13.1, uTime * uFlow.z * 1.6 - uSeed) * uFlow2.x * 0.6;
     c.x /= uAspect;
     vel += c * uFlow.x * 0.06;
+    // Lean: a steady current in one direction.
+    vec2 lean = uFlow2.zw * uFlow2.y * uFlow.x * 0.35;
+    lean.x /= uAspect;
+    vel += lean;
   }
   if (uDrift.z > 0.0) {
     vec2 dir = uDrift.xy;
@@ -304,15 +332,46 @@ void main() {
     float col = floor(across);
     float hc = hash12(vec2(col, uSeed));
     float stepN = hash12(vec2(col * 1.31, floor(uTime * 0.35 + hc * 3.0) + uSeed));
+    float smoothN = vnoise(vec2(across, uTime * 0.12 + uSeed));
     float wide = vnoise(vec2(across * 0.15, uTime * 0.1 + uSeed));
-    float n = stepN * 0.7 + wide * 0.6;
+    float n = mix(smoothN, stepN, uDrift2.x) * 0.7 + wide * 0.6;
     float sp = uDrift.z * mix(1.0, n * 1.55, uDrift.w);
     vec2 v = dir * sp * 0.45;
+    // Wobble: a sideways sway that travels along the drift.
+    v += perp * sin(dot(p, dir) * 9.0 - uTime * 2.3 + hc * 6.28) * uDrift2.y * uDrift.z * 0.35;
     v.x /= uAspect;
     vel += v;
   }
-  if (uWarp.x != 0.0 || uWarp.y != 0.0) {
-    vec2 v = p * uWarp.x * 0.5 + vec2(-p.y, p.x) * uWarp.y * 0.9;
+  if (uWarp.x != 0.0 || uWarp.y != 0.0 || uWarp.z != 0.0) {
+    vec2 q = p - uWarpC;
+    float r = length(q);
+    vec2 v = q * uWarp.x * 0.5 + vec2(-q.y, q.x) * (uWarp.y * 0.9 + uWarp.z * 2.4 * exp(-r * 4.0));
+    v.x /= uAspect;
+    vel += v;
+  }
+  if (uMelt.x > 0.0) {
+    // Dense paint drips; each drip column has its own pace.
+    float dens = texture(uDye, uv).a;
+    vec2 dir = uMelt2.xy;
+    vec2 perp = vec2(-dir.y, dir.x);
+    float across = dot(p, perp) * uMelt.z;
+    float hc = hash12(vec2(floor(across), uSeed + 7.0));
+    float pace = 0.35 + 1.3 * hc * (0.6 + 0.4 * vnoise(vec2(floor(across) * 0.7, uTime * 0.4)));
+    float heavy = smoothstep(uMelt.y - 0.12, uMelt.y + 0.12, dens);
+    vec2 v = dir * uMelt.x * pace * heavy * 0.6;
+    v += perp * sin(uTime * 1.9 + hc * 6.28 + dot(p, dir) * 7.0) * uMelt.w * uMelt.x * heavy * 0.2;
+    v.x /= uAspect;
+    vel += v;
+  }
+  for (int i = 0; i < 4; i++) {
+    if (i >= uRippleCount) break;
+    vec4 rp = uRipples[i];
+    vec2 d = p - rp.xy;
+    float r = length(d);
+    float front = rp.z * uRippleP.x;
+    float w = uRippleP.y;
+    float prof = exp(-((r - front) * (r - front)) / (w * w)) * sin((r - front) / w * 3.14159);
+    vec2 v = (d / max(r, 1e-4)) * prof * rp.w;
     v.x /= uAspect;
     vel += v;
   }
@@ -340,6 +399,25 @@ void main() {
     float n = fbm(vec3(p * uCloud.y, uCloud.w)) * 0.5 + 0.5;
     float a = smoothstep(uCloud.z, uCloud.z + 0.16, n) * uCloud.x;
     over(acc, palAt(uPalOff + n * 3.0 + 0.5), a * min(1.0, uDt * 2.5));
+  }
+
+  // Media: an image / video / camera frame (keyed by brightness), or a stylised
+  // hand / face / body mask (alpha = mask, rgb = interior shading).
+  if (uMediaP.x > 0.0) {
+    vec2 mu = vec2(p.x * uMediaXf.x, p.y * uMediaXf.y) + 0.5 - uMediaXf.zw;
+    if (mu.x > 0.0 && mu.x < 1.0 && mu.y > 0.0 && mu.y < 1.0) {
+      vec4 m = texture(uMedia, mu);
+      bool isMask = uMediaP.w > 0.5;
+      float l = luma(m.rgb);
+      float a = isMask ? smoothstep(uMediaP.y * 0.8, uMediaP.y * 0.8 + 0.25, m.a) : smoothstep(uMediaP.y, uMediaP.y + 0.18, l);
+      int look = int(uMediaP.z + 0.5);
+      vec3 col;
+      if (look == 0) col = isMask ? palAt(uPalOff + l * 2.0 + mu.y * 1.2) : ramp(l);
+      else if (look == 1) col = palAt(uPalOff) * (0.35 + l);
+      else if (look == 2) col = palAt(uPalOff + 1.0);
+      else col = isMask ? palAt(uPalOff) * (0.4 + 0.8 * l) : m.rgb;
+      over(acc, col, rate(a * uMediaP.x));
+    }
   }
 
   // Spectrum
@@ -465,6 +543,13 @@ uniform vec4 uStretch;
 uniform float uStretchCols;
 uniform vec4 uGlitch;
 uniform vec4 uChroma;
+uniform vec4 uSlices;
+uniform float uSliceSeed;
+uniform vec2 uPixel;
+uniform vec2 uRes;
+uniform vec4 uLiquid;
+uniform float uLiquidShine;
+uniform float uSliceGap;
 
 vec2 mirrorUv(vec2 uv) {
   if (uMirror.x < 0.5) return uv;
@@ -517,11 +602,44 @@ vec2 glitchUv(vec2 uv) {
   return uv;
 }
 
+vec2 slicesUv(vec2 uv, out float seam) {
+  seam = 0.0;
+  if (uSlices.x < 0.5) return uv;
+  bool vert = uSlices.y < 0.5;
+  float across = vert ? uv.x : uv.y;
+  float k = across * uSlices.z;
+  float id = floor(k);
+  float off = (hash12(vec2(id, uSliceSeed)) - 0.5) * 2.0 * uSlices.w * 0.25
+            + (vnoise(vec2(id * 1.7, uTime * 0.25)) - 0.5) * uSlices.w * 0.15;
+  float f = fract(k);
+  float g = uSliceGap;
+  seam = g > 0.0 ? 1.0 - smoothstep(0.0, g * 0.12 + 0.002, min(f, 1.0 - f)) : 0.0;
+  if (vert) uv.y += off;
+  else uv.x += off;
+  return uv;
+}
+
+vec2 pixelUv(vec2 uv) {
+  if (uPixel.x <= 1.0) return uv;
+  vec2 bs = vec2(uPixel.x) / uRes;
+  return (floor(uv / bs) + 0.5) * bs;
+}
+
 vec3 shade(vec2 uv) {
   vec4 d = texture(uDye, uv);
   float life = d.a;
   vec3 col = life > 1e-5 ? d.rgb / life : vec3(0.0);
   float op = smoothstep(0.0, max(uFadeFrac, 1e-3), life) * uIntro;
+  if (uLiquid.x > 0.0) {
+    // Solid shapes with crisp edges; noise carves small bubbles.
+    float n = vnoise(uv * vec2(uAspect, 1.0) * 90.0) * vnoise(uv * vec2(uAspect, 1.0) * 23.0 + 4.1);
+    float cov = op - n * uLiquid.z * 0.8;
+    float e = uLiquid.y * 0.12 + 0.004;
+    float solid = smoothstep(uLiquid.x - e, uLiquid.x + e, cov);
+    float rim = solid * (1.0 - smoothstep(uLiquid.x, uLiquid.x + 0.25, cov));
+    col = mix(col, min(col * 1.25 + 0.08, 1.0), rim * uLiquidShine);
+    op = solid;
+  }
   if (uBlend == 1) return uBg + col * op;
   if (uBlend == 2) return mix(uBg, uBg * col, op);
   if (uBlend == 3) return 1.0 - (1.0 - uBg) * (1.0 - col * op);
@@ -543,7 +661,9 @@ vec3 hsv2rgb(vec3 c) {
 }
 
 void main() {
-  vec2 uv = glitchUv(stretchUv(mirrorUv(vUv)));
+  float seam;
+  vec2 uvBase = glitchUv(stretchUv(slicesUv(mirrorUv(vUv), seam)));
+  vec2 uv = pixelUv(uvBase);
   vec3 c;
   if (uChroma.x > 0.0) {
     vec2 dir = vec2(cos(uChroma.y), sin(uChroma.y)) * uChroma.x * 0.012;
@@ -553,6 +673,8 @@ void main() {
   } else {
     c = shade(uv);
   }
+  if (uPixel.x > 1.0 && uPixel.y < 1.0) c = mix(shade(uvBase), c, uPixel.y);
+  if (seam > 0.0) c = mix(c, uBg, seam * 0.92);
   if (uMode == 1) c = ramp(luma(c));
   else if (uMode == 2) {
     float l = luma(c);
@@ -633,6 +755,7 @@ uniform vec4 uDither;
 uniform int uDitherStyle;
 uniform vec4 uGrain;
 uniform vec2 uVignette;
+uniform vec4 uSheen;
 
 float bayer8(ivec2 p) {
   int x = p.x & 7;
@@ -655,6 +778,20 @@ void main() {
   vec3 c = texture(uComp, uv).rgb;
   if (uBlurMix > 0.0) c = mix(c, texture(uBlur, uv).rgb, uBlurMix);
   if (uBloomInt > 0.0) c += texture(uBloom, uv).rgb * uBloomInt;
+
+  if (uSheen.x > 0.0) {
+    // Thin-film iridescence keyed to brightness and its slope, plus glowing ridges.
+    vec2 px = uSheen.w / uRes;
+    float lc = luma(texture(uComp, uv).rgb);
+    float lx = luma(texture(uComp, uv + vec2(px.x, 0.0)).rgb) - luma(texture(uComp, uv - vec2(px.x, 0.0)).rgb);
+    float ly = luma(texture(uComp, uv + vec2(0.0, px.y)).rgb) - luma(texture(uComp, uv - vec2(0.0, px.y)).rgb);
+    float g = length(vec2(lx, ly));
+    float phase = lc * uSheen.z + g * 6.0 + atan(ly, lx) * 0.08;
+    vec3 film = 0.5 + 0.5 * cos(6.2831853 * (phase + vec3(0.0, 0.33, 0.67)));
+    c = mix(c, c * (0.55 + film * 0.9) + film * 0.12, uSheen.x);
+    float ridge = smoothstep(0.02, 0.25, g);
+    c += ridge * uSheen.y * (0.6 + 0.4 * film);
+  }
 
   if (uContour.x > 0.0) {
     float l = luma(clamp(c, 0.0, 1.0)) * uContour.y;

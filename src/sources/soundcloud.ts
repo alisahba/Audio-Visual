@@ -78,7 +78,8 @@ export async function createTransport(host: HTMLElement, link: string, onInfo: (
   const SC = await loadApi();
   const url = link.trim().startsWith('http') ? link.trim() : `https://${link.trim()}`;
   const iframe = document.createElement('iframe');
-  iframe.allow = 'autoplay';
+  // Some SoundCloud streams are protected; the player needs EME as well as autoplay.
+  iframe.allow = 'autoplay; encrypted-media';
   iframe.height = '120';
   iframe.title = 'SoundCloud player';
   iframe.src = `https://w.soundcloud.com/player/?${new URLSearchParams({

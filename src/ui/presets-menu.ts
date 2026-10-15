@@ -39,7 +39,7 @@ export class PresetsMenu {
     this.el = h(
       'div',
       { class: 'presets', role: 'dialog', 'aria-label': 'Presets' },
-      h('div', { class: 'sec-head', style: 'margin-bottom:14px' }, h('span', { class: 'title' }, 'Presets'), h('span', { class: 'hint' }, 'Starting points — every control stays editable. Keys 1–8.')),
+      h('div', { class: 'presets-head' }, h('span', { class: 'title' }, 'Presets'), h('span', { class: 'hint' }, 'Starting points — every control stays editable. Keys 1–9, 0 for the tenth.')),
       grid,
     );
     document.body.appendChild(this.el);

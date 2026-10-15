@@ -1,6 +1,8 @@
 import type { AudioSettings, BeatSettings } from '../state/project';
-import { BAND_CENTRES, BAND_COUNT, BAND_EDGES, RANGE_HIGH, RANGE_LOW, RANGE_MID, bandsInRange } from './bands';
+import { BAND_CENTRES, BAND_COUNT, RANGE_HIGH, RANGE_LOW, RANGE_MID, bandsInRange } from './bands';
 import { beatIndexAfter, readBands, readEnv, type TrackAnalysis } from './analysis';
+import { onsetDelta } from './beats';
+import { applyFilterbank, bandsDb, fineRange, makeBandMap, makeFilterbank } from './dsp';
 
 export const WAVE_SIZE = 256;
 
@@ -130,59 +132,111 @@ export class FileFeed implements FeatureSource {
   }
 }
 
-/** Real-time features from an AnalyserNode (mic, tab or system audio). */
+/** Where live frames come from: the analysis worklet (preferred) or an AnalyserNode. */
+export type LiveSource = { kind: 'worklet'; port: MessagePort } | { kind: 'analyser'; analyser: AnalyserNode };
+
+interface LiveFrame {
+  bands: Float32Array;
+  fine: Float32Array;
+  wave: Float32Array;
+  levelDb: number;
+}
+
+/**
+ * Real-time features for mic, tab or system audio. Uses the same filterbanks,
+ * SuperFlux onset strength and peak picking as the offline analysis, with a
+ * 3-frame lookahead (~32 ms) so peaks are confirmed before a beat fires.
+ */
 export class LiveFeed implements FeatureSource {
   readonly kind = 'live';
-  private freq: Float32Array<ArrayBuffer>;
-  private time: Float32Array<ArrayBuffer>;
+  beatSettings: BeatSettings;
+  /** Latest input level in dBFS (diagnostics: tells silence from a broken capture). */
+  levelDb = -120;
+  private queue: LiveFrame[] = [];
+  private centres: Float32Array | null = null;
+  private hopSec = 1 / 60;
   private ceil = new Float32Array(BAND_COUNT).fill(-60);
   private levelCeil = -40;
-  private prevBands = new Float32Array(BAND_COUNT);
   private envPeak = { low: 0.4, mid: 0.4, high: 0.4 };
-  private novHist: number[] = [];
-  private novNorm = 0.2;
-  private lastBeat = -1e9;
-  private lastPoll = 0;
+  private prevFine: Float32Array | null = null;
+  private odf: number[] = [];
+  private peakVals: { v: number; t: number }[] = [];
+  private frameNo = 0;
+  private lastBeatFrame = -1e9;
+  private lastBeatV = 0;
   private cached: RawFrame = makeRaw();
   private pendingBeats = 0;
-  beatSettings: BeatSettings;
+  private analyserBuf: Float32Array<ArrayBuffer> | null = null;
+  private analyserTime: Float32Array<ArrayBuffer> | null = null;
+  private fb: ReturnType<typeof makeFilterbank> | null = null;
+  private map: ReturnType<typeof makeBandMap> | null = null;
+  private mag: Float32Array | null = null;
+  private lastPoll = 0;
 
   constructor(
-    public analyser: AnalyserNode,
+    readonly source: LiveSource,
     beat: BeatSettings,
   ) {
-    analyser.fftSize = 2048;
-    analyser.smoothingTimeConstant = 0;
-    analyser.minDecibels = -110;
-    analyser.maxDecibels = -5;
-    this.freq = new Float32Array(analyser.frequencyBinCount);
-    this.time = new Float32Array(analyser.fftSize);
     this.beatSettings = beat;
+    if (source.kind === 'worklet') {
+      source.port.onmessage = (e: MessageEvent) => {
+        const m = e.data;
+        if (m.type === 'init') {
+          this.centres = m.centres;
+          this.hopSec = m.hopSec;
+        } else if (m.type === 'frame') {
+          this.queue.push(m as LiveFrame);
+          if (this.queue.length > 64) this.queue.shift();
+        }
+      };
+    } else {
+      const an = source.analyser;
+      an.fftSize = 2048;
+      an.smoothingTimeConstant = 0;
+      an.minDecibels = -120;
+      an.maxDecibels = 0;
+      this.analyserBuf = new Float32Array(an.frequencyBinCount);
+      this.analyserTime = new Float32Array(an.fftSize);
+      this.fb = makeFilterbank(an.context.sampleRate, an.fftSize);
+      this.map = makeBandMap(an.context.sampleRate, an.fftSize);
+      this.mag = new Float32Array(an.frequencyBinCount + 1);
+      this.centres = this.fb.centres;
+    }
   }
 
-  /** Read the analyser once per animation frame. */
+  /** Drain new analysis frames; call once per animation frame. */
   poll(now: number): void {
-    const dt = Math.min(0.1, Math.max(0.001, (now - this.lastPoll) / 1000 || 1 / 60));
-    this.lastPoll = now;
-    const an = this.analyser;
-    an.getFloatFrequencyData(this.freq);
-    an.getFloatTimeDomainData(this.time);
-    const binHz = an.context.sampleRate / an.fftSize;
+    if (this.source.kind === 'analyser') {
+      const dt = Math.min(0.1, Math.max(0.005, (now - this.lastPoll) / 1000 || 1 / 60));
+      this.lastPoll = now;
+      this.hopSec = dt;
+      const an = this.source.analyser;
+      an.getFloatFrequencyData(this.analyserBuf!);
+      an.getFloatTimeDomainData(this.analyserTime!);
+      const mag = this.mag!;
+      for (let k = 0; k < this.analyserBuf!.length; k++) mag[k] = Math.pow(10, this.analyserBuf![k] / 20) * 2;
+      const bands = new Float32Array(BAND_COUNT);
+      const fine = new Float32Array(this.fb!.count);
+      bandsDb(this.map!, mag, bands);
+      applyFilterbank(this.fb!, mag, fine);
+      const t = this.analyserTime!;
+      let sq = 0;
+      for (let i = 0; i < t.length; i++) sq += t[i] * t[i];
+      const wave = new Float32Array(WAVE_SIZE);
+      const span = Math.floor(t.length / WAVE_SIZE / 2);
+      const off = t.length / 2 - (WAVE_SIZE * span) / 2;
+      for (let i = 0; i < WAVE_SIZE; i++) wave[i] = t[off + i * span];
+      this.ingest({ bands, fine, wave, levelDb: 10 * Math.log10(sq / t.length + 1e-12) });
+      return;
+    }
+    for (const fr of this.queue.splice(0)) this.ingest(fr);
+  }
+
+  private ingest(fr: LiveFrame): void {
+    const dt = this.hopSec;
     const raw = this.cached;
     for (let b = 0; b < BAND_COUNT; b++) {
-      const k0 = Math.max(1, Math.ceil(BAND_EDGES[b] / binHz));
-      const k1 = Math.min(this.freq.length - 1, Math.floor(BAND_EDGES[b + 1] / binHz));
-      let db: number;
-      if (k1 < k0) {
-        const pos = BAND_CENTRES[b] / binHz;
-        const i = Math.floor(pos);
-        const fr = pos - i;
-        db = this.freq[i] * (1 - fr) + this.freq[Math.min(this.freq.length - 1, i + 1)] * fr;
-      } else {
-        let p = 0;
-        for (let k = k0; k <= k1; k++) p += Math.pow(10, this.freq[k] / 10);
-        db = 10 * Math.log10(p / (k1 - k0 + 1) + 1e-12);
-      }
+      let db = fr.bands[b];
       if (!isFinite(db)) db = -120;
       this.ceil[b] = Math.max(db, this.ceil[b] - 4 * dt, -75);
       raw.bands[b] = Math.min(1.25, Math.max(0, 1 + (db - this.ceil[b]) / 42));
@@ -198,36 +252,80 @@ export class LiveFeed implements FeatureSource {
     raw.low = envOf(RANGE_LOW, 'low');
     raw.mid = envOf(RANGE_MID, 'mid');
     raw.high = envOf(RANGE_HIGH, 'high');
-    let sq = 0;
-    for (let i = 0; i < this.time.length; i++) sq += this.time[i] * this.time[i];
-    const ldb = 10 * Math.log10(sq / this.time.length + 1e-12);
-    this.levelCeil = Math.max(ldb, this.levelCeil - 3 * dt, -60);
-    raw.level = Math.min(1.25, Math.max(0, 1 + (ldb - this.levelCeil) / 30));
-    const span = Math.floor(this.time.length / WAVE_SIZE / 2);
-    const off = this.time.length / 2 - (WAVE_SIZE * span) / 2;
-    for (let i = 0; i < WAVE_SIZE; i++) raw.wave[i] = this.time[off + i * span];
+    this.levelDb = fr.levelDb;
+    this.levelCeil = Math.max(fr.levelDb, this.levelCeil - 3 * dt, -60);
+    raw.level = fr.levelDb < -80 ? 0 : Math.min(1.25, Math.max(0, 1 + (fr.levelDb - this.levelCeil) / 30));
+    raw.wave.set(fr.wave);
+    this.onset(fr.fine);
+  }
 
-    // Causal onset detection on the chosen frequency window.
+  private onset(fine: Float32Array): void {
+    const n = this.frameNo++;
+    const prev = this.prevFine;
+    this.prevFine = fine;
+    if (!prev || !this.centres) {
+      this.odf.push(0);
+      return;
+    }
     const bs = this.beatSettings;
-    const idx = bandsInRange(bs.lo, bs.hi);
-    let nov = 0;
-    for (const b of idx) {
-      const d = raw.bands[b] - this.prevBands[b];
-      if (d > 0) nov += d;
+    const [b0, b1] = fineRange(this.centres, bs.lo, bs.hi);
+    const flux = (lo: number, hi: number) => {
+      let acc = 0;
+      for (let b = lo; b <= hi; b++) {
+        const p0 = prev[b];
+        const d = fine[b] - Math.max(p0, b > 0 ? prev[b - 1] : p0, b < fine.length - 1 ? prev[b + 1] : p0);
+        if (d > 0) acc += d;
+      }
+      return acc;
+    };
+    const inside = flux(b0, b1) / Math.sqrt(b1 - b0 + 1);
+    const outside = Math.max(b0 > 0 ? flux(0, b0 - 1) / Math.sqrt(b0) : 0, b1 < fine.length - 1 ? flux(b1 + 1, fine.length - 1) / Math.sqrt(fine.length - 1 - b1) : 0);
+    const share = inside / (inside + outside * 0.6 + 1e-4);
+    const v = inside * Math.pow(Math.min(1, share * 1.6), 0.8);
+    this.odf.push(v);
+    if (this.odf.length > 256) this.odf.shift();
+
+    // Typical hit size: median of the strongest recent peaks (≈1.5 per second over 8 s).
+    const L = 3;
+    const h = this.odf;
+    const c = h.length - 1 - L;
+    if (c < 1) return;
+    const cv = h[c];
+    const isLocalMax = cv > 0 && cv >= h[c - 1] && cv > h[c + 1];
+    const now = n * this.hopSec;
+    if (isLocalMax) {
+      this.peakVals.push({ v: cv, t: now });
+      while (this.peakVals.length && now - this.peakVals[0].t > 8) this.peakVals.shift();
     }
-    nov /= Math.sqrt(idx.length);
-    this.prevBands.set(raw.bands);
-    this.novNorm = Math.max(nov, this.novNorm * Math.exp(-dt / 4), 0.05);
-    const n = nov / (this.novNorm * 0.7);
-    this.novHist.push(n);
-    if (this.novHist.length > 30) this.novHist.shift();
-    const mean = this.novHist.reduce((s, v) => s + v, 0) / this.novHist.length;
-    const s = Math.min(1, Math.max(0, bs.sensitivity));
-    const thr = mean * (2.1 - 1.1 * s) + (0.35 - 0.3 * s);
-    if (n > thr && now - this.lastBeat >= bs.hold) {
-      this.lastBeat = now;
-      this.pendingBeats++;
+    const top = this.peakVals.map((p) => p.v).sort((a, b) => b - a);
+    const k = Math.max(4, Math.round(8 * 1.5));
+    const slice = top.slice(0, Math.min(top.length, k));
+    const scale = Math.max(1e-3, slice.length ? slice[Math.floor(slice.length / 2)] : 1);
+    if (!isLocalMax) return;
+    const fps = 1 / this.hopSec;
+    const preMax = Math.max(1, Math.round(0.035 * fps));
+    for (let j = Math.max(0, c - preMax); j <= Math.min(h.length - 1, c + L); j++) if (h[j] > cv) return;
+    const preAvg = Math.round(0.1 * fps);
+    let sum = 0;
+    let cnt = 0;
+    for (let j = Math.max(0, c - preAvg); j <= h.length - 1; j++) {
+      sum += h[j];
+      cnt++;
     }
+    const norm = cv / scale;
+    if (norm < 0.12) return;
+    if (norm < sum / cnt / scale + onsetDelta(bs.sensitivity)) return;
+    const frameC = n - L;
+    const hold = (bs.hold / 1000) * fps;
+    if (frameC - this.lastBeatFrame < hold) {
+      // Within the minimum gap only a stronger peak may replace the last one;
+      // it has already fired, so just remember the stronger level.
+      this.lastBeatV = Math.max(this.lastBeatV, norm);
+      return;
+    }
+    this.lastBeatFrame = frameC;
+    this.lastBeatV = norm;
+    this.pendingBeats++;
   }
 
   sample(_t0: number, _t1: number, raw: RawFrame): number {

@@ -43,6 +43,17 @@ function hash1(n: number): number {
   return x - Math.floor(x);
 }
 
+export interface MediaFrame {
+  source: TexImageSource;
+  /** Bumped whenever the pixels change, so unchanged images aren't re-uploaded. */
+  version: number;
+  /** Width / height. */
+  aspect: number;
+  /** True for stylised hand / face / body masks (alpha carries the shape). */
+  mask: boolean;
+  mirror?: boolean;
+}
+
 interface Drop {
   x: number;
   y: number;
@@ -102,6 +113,13 @@ export class Renderer {
   private specTex: WebGLTexture;
 
   private drops: Drop[] = [];
+  private ripples: { x: number; y: number; age: number }[] = [];
+  private sliceSeed = 0;
+  private barAge = 10;
+  private mediaTex: WebGLTexture;
+  private mediaVersion = -1;
+  /** Current media frame (image, video, camera or stylised mask), set by the media manager. */
+  media: MediaFrame | null = null;
   private splats: Splat[] = [];
   private rand = mulberry(1);
   private seed = 1;
@@ -110,6 +128,7 @@ export class Renderer {
   private prevOrbs: number[] = [];
   private stirAcc = 0;
   private glitchSeed = 0;
+  private lastDrop: { x: number; y: number } | null = null;
   private pal = new Float32Array(15);
   private features: Features | null = null;
   private project: Project | null = null;
@@ -158,6 +177,7 @@ export class Renderer {
     P('paint', S.PAINT_FS);
     P('comp', S.COMPOSITE_FS);
     P('down', S.DOWN_FS);
+    P('buoy', S.BUOY_FS);
     P('up', S.UP_FS);
     P('final', S.FINAL_FS);
 
@@ -173,6 +193,13 @@ export class Renderer {
     };
     this.waveTex = mkData(WAVE_SIZE);
     this.specTex = mkData(BAND_COUNT);
+    this.mediaTex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, this.mediaTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
   }
 
   get contextLost(): boolean {
@@ -285,6 +312,10 @@ export class Renderer {
     this.prevOrbs = [];
     this.stirAcc = 0;
     this.glitchSeed = 0;
+    this.ripples = [];
+    this.sliceSeed = 0;
+    this.barAge = 10;
+    this.lastDrop = null;
     for (const pp of [this.vel, this.pressure, this.dye]) {
       if (!pp) continue;
       this.clearTarget(pp.read);
@@ -352,10 +383,11 @@ export class Renderer {
         const colIdx = (ci + i) % 5;
         const col: [number, number, number] = [this.pal[colIdx * 3], this.pal[colIdx * 3 + 1], this.pal[colIdx * 3 + 2]];
         this.drops.push({ x, y, r: size * (0.75 + rnd() * 0.5) * 0.5, age: 0, life, col });
+        this.lastDrop = { x, y };
         if (this.on('fluid')) {
           // A vortex survives the pressure projection, so drops marble the paint around them.
           const push = this.val('ink', 'push') * 1400 * (0.5 + this.val('fluid', 'force')) * (rnd() < 0.5 ? -1 : 1);
-          this.splats.push({ x: x / aspect + 0.5, y: y + 0.5, dx: push, dy: 0, r: size * size * 0.05 + 0.002, radial: true });
+          this.splats.push({ x: x / aspect + 0.5, y: y + 0.5, dx: push, dy: 0, r: (size * size * 0.05 + 0.002) * this.splatScale(), radial: true });
         }
       }
       while (this.drops.length > MAX_DROPS) this.drops.shift();
@@ -389,12 +421,30 @@ export class Renderer {
           const k = 900 * this.val('fluid', 'force');
           const vx = ((x - px) / dt) * k;
           const vy = ((y - py) / dt) * k;
-          if (vx * vx + vy * vy > 1) this.splats.push({ x: x / aspect + 0.5, y: y + 0.5, dx: vx, dy: vy, r: r * r * 0.25 + 0.0008, radial: false });
+          if (vx * vx + vy * vy > 1) this.splats.push({ x: x / aspect + 0.5, y: y + 0.5, dx: vx, dy: vy, r: (r * r * 0.25 + 0.0008) * this.splatScale(), radial: false });
         }
         this.prevOrbs[i * 2] = x;
         this.prevOrbs[i * 2 + 1] = y;
       }
     }
+
+    // Ripples: one ring per beat.
+    if (f.barNow) this.barAge = 0;
+    else this.barAge += dt;
+    if (f.beatNow) this.sliceSeed = (this.sliceSeed + 1 + rnd() * 3) % 1000;
+    if (this.on('ripple') && f.beatNow) {
+      const origin = this.sel('ripple', 'origin');
+      let x = 0;
+      let y = 0;
+      if (origin === 'random') {
+        x = (rnd() - 0.5) * aspect * 0.8;
+        y = (rnd() - 0.5) * 0.8;
+      } else if (origin === 'ink' && this.lastDrop) ({ x, y } = this.lastDrop);
+      this.ripples.push({ x, y, age: 0 });
+      if (this.ripples.length > 4) this.ripples.shift();
+    }
+    for (const r of this.ripples) r.age += dt;
+    this.ripples = this.ripples.filter((r) => r.age < 3);
 
     // Fluid stirring.
     if (this.on('fluid')) {
@@ -405,14 +455,14 @@ export class Renderer {
         this.stirAcc -= 1;
         const a = rnd() * Math.PI * 2;
         const m = (600 + rnd() * 1400) * force * (0.4 + f.level);
-        this.splats.push({ x: 0.1 + rnd() * 0.8, y: 0.1 + rnd() * 0.8, dx: Math.cos(a) * m, dy: Math.sin(a) * m, r: 0.004 + rnd() * 0.01, radial: false });
+        this.splats.push({ x: 0.1 + rnd() * 0.8, y: 0.1 + rnd() * 0.8, dx: Math.cos(a) * m, dy: Math.sin(a) * m, r: (0.004 + rnd() * 0.01) * this.splatScale(), radial: false });
       }
       if (f.beatNow && project.fx.fluid.drive === 'beat') {
         const a = rnd() * Math.PI * 2;
         const m = 2500 * force * project.fx.fluid.depth;
-        this.splats.push({ x: 0.25 + rnd() * 0.5, y: 0.25 + rnd() * 0.5, dx: Math.cos(a) * m, dy: Math.sin(a) * m, r: 0.02, radial: false });
+        this.splats.push({ x: 0.25 + rnd() * 0.5, y: 0.25 + rnd() * 0.5, dx: Math.cos(a) * m, dy: Math.sin(a) * m, r: 0.02 * this.splatScale(), radial: false });
       }
-      this.stepFluid(dt, aspect);
+      this.stepFluid(dt, aspect, project);
     } else {
       this.splats.length = 0;
     }
@@ -421,7 +471,11 @@ export class Renderer {
     this.frame++;
   }
 
-  private stepFluid(dt: number, aspect: number): void {
+  private splatScale(): number {
+    return this.project?.fx.fluid ? (this.project.fx.fluid.p.splat as number) ?? 1 : 1;
+  }
+
+  private stepFluid(dt: number, aspect: number, project: Project): void {
     const gl = this.gl;
     const texel: [number, number] = [1 / this.simW, 1 / this.simH];
     const P = this.progs;
@@ -435,6 +489,13 @@ export class Renderer {
         b.set([s.r, s.radial ? 1 : 0, 0, 0], i * 4);
       });
       P.splat.use().tex('uVel', 0, this.vel.read.tex).f('uAspect', aspect).i('uCount', batch.length).v4('uSplat', a).v4('uSplatR', b);
+      this.draw(this.vel.write);
+      this.vel.swap();
+    }
+    const gravity = project.fx.fluid.p.gravity as number;
+    if (gravity && this.dye) {
+      // Buoyancy: paint rises (or sinks) and drags the fluid with it.
+      P.buoy.use().tex('uVel', 0, this.vel.read.tex).tex('uDye', 1, this.dye.read.tex).f('uGravity', gravity * 900).f('uDt', dt);
       this.draw(this.vel.write);
       this.vel.swap();
     }
@@ -498,12 +559,32 @@ export class Renderer {
 
     P.f('uFluidAmt', this.on('fluid') ? 1 : 0);
     P.f('uFlow', this.on('flow') ? this.val('flow', 'speed') : 0, this.val('flow', 'scale'), this.val('flow', 'evolve'), 0);
+    {
+      const la = (this.val('flow', 'angle') * Math.PI) / 180;
+      P.f('uFlow2', this.val('flow', 'detail'), this.val('flow', 'bias'), Math.cos(la), Math.sin(la));
+    }
     if (this.on('drift')) {
       const ang = (this.val('drift', 'angle') * Math.PI) / 180;
       P.f('uDrift', Math.cos(ang), Math.sin(ang), this.val('drift', 'speed'), this.val('drift', 'streak'));
       P.f('uDriftCols', this.val('drift', 'columns'));
+      P.f('uDrift2', this.val('drift', 'hardness'), this.val('drift', 'wobble'), 0, 0);
     } else P.f('uDrift', 1, 0, 0, 0);
-    P.f('uWarp', this.on('warp') ? this.val('warp', 'zoom') : 0, this.on('warp') ? this.val('warp', 'spin') : 0);
+    if (this.on('warp')) {
+      P.f('uWarp', this.val('warp', 'zoom'), this.val('warp', 'spin'), this.val('warp', 'twist'), 0);
+      P.f('uWarpC', this.val('warp', 'cx') * aspect, this.val('warp', 'cy'));
+    } else P.f('uWarp', 0, 0, 0, 0);
+    if (this.on('melt')) {
+      const ma = (this.val('melt', 'angle') * Math.PI) / 180;
+      P.f('uMelt', this.val('melt', 'speed'), this.val('melt', 'threshold'), this.val('melt', 'columns'), this.val('melt', 'wobble'));
+      P.f('uMelt2', Math.cos(ma), Math.sin(ma), 0, 0);
+    } else P.f('uMelt', 0, 0.5, 10, 0);
+    if (this.on('ripple')) {
+      const rd = new Float32Array(16);
+      const strength = this.val('ripple', 'strength');
+      this.ripples.forEach((r, i) => rd.set([r.x, r.y, r.age, strength * 0.9 * Math.exp(-r.age * 1.2)], i * 4));
+      P.i('uRippleCount', this.ripples.length).v4('uRipples', rd).f('uRippleP', this.val('ripple', 'speed') * 0.6, this.val('ripple', 'width') * 0.5);
+    } else P.i('uRippleCount', 0);
+    this.bindMedia(P, aspect);
 
     const hold = this.val('time', 'hold');
     const fade = this.val('time', 'fade');
@@ -545,6 +626,42 @@ export class Renderer {
 
     this.draw(this.dye.write);
     this.dye.swap();
+  }
+
+  private bindMedia(P: Program, aspect: number): void {
+    const gl = this.gl;
+    const m = this.media;
+    const f = this.features!;
+    if (!this.on('media') || !m) {
+      P.f('uMediaP', 0, 0, 0, 0);
+      return;
+    }
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, this.mediaTex);
+    if (m.version !== this.mediaVersion) {
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+      try {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, m.source);
+      } catch {
+        /* frame not ready */
+      }
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      this.mediaVersion = m.version;
+    }
+    P.i('uMedia', 4);
+    // Cover-fit the media to the canvas, then apply scale and offset.
+    const scale = this.val('media', 'scale');
+    const fitW = m.aspect > aspect ? aspect / m.aspect : 1;
+    const fitH = m.aspect > aspect ? 1 : m.aspect / aspect;
+    const sx = (1 / aspect) * fitW / scale;
+    const sy = fitH / scale;
+    P.f('uMediaXf', sx * (m.mirror ? -1 : 1), sy, this.val('media', 'x') * 0.5, this.val('media', 'y') * 0.5);
+    const inject = this.sel('media', 'inject');
+    let amount = this.val('media', 'amount');
+    if (inject === 'beat') amount *= f.beat;
+    else if (inject === 'bar') amount *= Math.exp(-this.barAge / 0.25);
+    const look = ['palette', 'tint', 'ink', 'original'].indexOf(this.sel('media', 'look'));
+    P.f('uMediaP', amount, this.val('media', 'key'), Math.max(0, look), m.mask ? 1 : 0);
   }
 
   // ── Output ────────────────────────────────────────────────────────────
@@ -599,6 +716,17 @@ export class Renderer {
     if (this.on('chroma')) {
       C.f('uChroma', this.val('chroma', 'amount'), (this.val('chroma', 'angle') * Math.PI) / 180, this.val('chroma', 'radial'), 0);
     } else C.f('uChroma', 0, 0, 0, 0);
+    if (this.on('slices')) {
+      C.f('uSlices', 1, this.sel('slices', 'axis') === 'h' ? 1 : 0, Math.round(this.val('slices', 'count')), this.val('slices', 'offset'));
+      C.f('uSliceSeed', this.sliceSeed).f('uSliceGap', this.val('slices', 'gap'));
+    } else C.f('uSlices', 0, 0, 1, 0).f('uSliceGap', 0);
+    const pxs = Math.min(this.width, this.height) / 1080;
+    C.f('uRes', this.width, this.height);
+    if (this.on('pixelate')) C.f('uPixel', Math.max(1, this.val('pixelate', 'size') * pxs), this.val('pixelate', 'mix'));
+    else C.f('uPixel', 0, 1);
+    if (this.on('liquid')) {
+      C.f('uLiquid', Math.max(0.01, this.val('liquid', 'edge')), this.val('liquid', 'softness'), this.val('liquid', 'holes'), 0).f('uLiquidShine', this.val('liquid', 'shine'));
+    } else C.f('uLiquid', 0, 0, 0, 0).f('uLiquidShine', 0);
 
     this.draw(this.comp);
 
@@ -647,6 +775,8 @@ export class Renderer {
     else F.f('uGrain', 0, 1, 0, 0);
     if (this.on('vignette')) F.f('uVignette', this.val('vignette', 'amount'), this.val('vignette', 'softness'));
     else F.f('uVignette', 0, 0);
+    if (this.on('sheen')) F.f('uSheen', this.val('sheen', 'amount'), this.val('sheen', 'ridges'), this.val('sheen', 'scale'), Math.max(1, 1.5 * pxScale));
+    else F.f('uSheen', 0, 0, 1, 1);
     this.draw(null);
   }
 

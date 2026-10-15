@@ -2,10 +2,12 @@ import type { Features } from '../audio/features';
 import { DRIVES, EFFECTS, GROUPS, type Drive, type EffectDef, type RangeParam } from '../state/defs';
 import { modulated } from '../state/modulate';
 import { PALETTES } from '../state/presets';
+import { defaultEffects } from '../state/project';
 import { store } from '../state/store';
 import { check, rangeRow, segmented, selectRow, type RangeRow } from './controls';
-import { h, icon } from './dom';
+import { h, icon, toast } from './dom';
 import { randomPalette } from './palette';
+import { Section } from './section';
 
 interface CardRefs {
   card: HTMLElement;
@@ -13,28 +15,49 @@ interface CardRefs {
   drive: HTMLElement | null;
 }
 
+interface SavedPalette {
+  name: string;
+  colors: string[];
+  bg: string;
+}
+
+const MY_PALETTES = 'klangbild.palettes.v1';
+
+function readMine(): SavedPalette[] {
+  try {
+    return JSON.parse(localStorage.getItem(MY_PALETTES) ?? '[]');
+  } catch {
+    return [];
+  }
+}
+
 export class EffectsPanel {
   readonly el: HTMLElement;
   private ranges = new Map<string, RangeRow>();
   private selects = new Map<string, (v: string) => void>();
   private cards = new Map<string, CardRefs>();
+  private sections = new Map<string, Section>();
   private swatches: HTMLElement[] = [];
   private bgSwatch!: HTMLElement;
+  private paletteList!: HTMLElement;
   private pop: HTMLElement | null = null;
   artworkPalette: (() => void) | null = null;
   private artBtn!: HTMLButtonElement;
 
-  constructor() {
-    this.el = h('aside', { class: 'panel right', 'aria-label': 'Effects' });
+  /** `extras` adds custom UI at the top of an effect card (e.g. the media picker). */
+  constructor(private extras: Record<string, HTMLElement> = {}) {
+    const nav = h(
+      'nav',
+      { class: 'sec-nav', 'aria-label': 'Sections' },
+      GROUPS.map((g) => h('button', { type: 'button', title: g.hint, onclick: () => Section.reveal(g.id) }, h('b', null, g.num), ` ${g.label}`)),
+    );
+    this.el = h('aside', { class: 'panel right', 'aria-label': 'Effects' }, nav);
     for (const g of GROUPS) {
-      const sec = h(
-        'section',
-        { class: 'sec', id: `sec-${g.id}` },
-        h('div', { class: 'sec-head' }, h('span', { class: 'num' }, g.num), h('span', { class: 'title' }, g.label), h('span', { class: 'hint' }, g.hint)),
-      );
-      if (g.id === 'colour') sec.appendChild(this.paletteBlock());
-      for (const e of EFFECTS.filter((x) => x.group === g.id)) sec.appendChild(this.card(e));
-      this.el.appendChild(sec);
+      const sec = new Section(g.id, g.num, g.label, g.hint);
+      this.sections.set(g.id, sec);
+      if (g.id === 'colour') sec.body.appendChild(this.paletteBlock());
+      for (const e of EFFECTS.filter((x) => x.group === g.id)) sec.body.appendChild(this.card(e));
+      this.el.appendChild(sec.el);
     }
     document.addEventListener('pointerdown', (e) => {
       if (this.pop && !this.pop.contains(e.target as Node)) this.closePop();
@@ -48,7 +71,7 @@ export class EffectsPanel {
   private card(e: EffectDef): HTMLElement {
     const st = () => store.p.fx[e.id];
     const body = h('div', { class: 'card-body' });
-    if (e.hint) body.appendChild(h('div', { class: 'card-hint' }, e.hint));
+    if (this.extras[e.id]) body.appendChild(this.extras[e.id]);
     for (const pd of e.params) {
       const key = `${e.id}.${pd.key}`;
       if (pd.type === 'range') {
@@ -86,17 +109,37 @@ export class EffectsPanel {
         });
     let driveBtn: HTMLElement | null = null;
     if (e.drive) {
-      driveBtn = h('button', { type: 'button', class: 'drive', title: 'Audio drive' }, h('i', { class: 'lamp' }), h('span', { class: 'drive-label' }, 'Off'));
+      driveBtn = h('button', { type: 'button', class: 'drive', title: 'What drives this effect (sound or time)' }, h('i', { class: 'lamp' }), h('span', { class: 'drive-label' }, 'Off'));
       driveBtn.addEventListener('click', (ev) => {
         ev.stopPropagation();
         this.openDrive(e, driveBtn!);
       });
     }
+    const reset = h(
+      'button',
+      {
+        type: 'button',
+        class: 'reset',
+        title: `Reset ${e.label} to its defaults`,
+        'aria-label': `Reset ${e.label}`,
+        onclick: (ev: Event) => {
+          ev.stopPropagation();
+          const def = defaultEffects()[e.id];
+          store.update('fx', (p) => {
+            p.fx[e.id].p = def.p;
+            p.fx[e.id].drive = def.drive;
+            p.fx[e.id].depth = def.depth;
+          });
+        },
+      },
+      icon('restart'),
+    );
     const head = h(
       'div',
-      { class: 'card-head', onclick: () => card.classList.toggle('open') },
-      toggle ? toggle.el : h('span', { style: 'width:12px' }),
+      { class: 'card-head', title: e.hint, onclick: () => card.classList.toggle('open') },
+      toggle ? toggle.el : h('span', { class: 'check-spacer' }),
       h('span', { class: 'name' }, e.label),
+      reset,
       driveBtn,
       caret,
     );
@@ -126,8 +169,8 @@ export class EffectsPanel {
     });
     const pop = h(
       'div',
-      { class: 'pop', role: 'dialog', 'aria-label': `${e.label} audio drive` },
-      h('div', { class: 'pop-title' }, h('span', null, `${e.label} — audio drive`), h('span', { class: 'muted' }, target.label)),
+      { class: 'pop', role: 'dialog', 'aria-label': `${e.label} drive` },
+      h('div', { class: 'pop-title' }, h('span', null, `${e.label} — drive`), h('span', { class: 'muted' }, target.label)),
       seg.el,
       depth.row,
       h(
@@ -150,13 +193,19 @@ export class EffectsPanel {
   }
 
   private paletteBlock(): HTMLElement {
-    const wrap = h('div', { style: 'margin-bottom:14px' });
+    const wrap = h('div', { class: 'palette-block' });
     const head = h('div', { class: 'sub-head' }, h('span', null, 'Palette'));
     const actions = h('span', { class: 'hstack' });
     this.artBtn = h('button', { type: 'button', class: 'btn small ghost', title: 'Take colours from the track artwork', onclick: () => this.artworkPalette?.() }, 'From artwork') as HTMLButtonElement;
     this.artBtn.style.display = 'none';
-    const dice = h('button', { type: 'button', class: 'btn small ghost', title: 'Random palette', onclick: () => store.update('palette', (p) => (p.palette = randomPalette())) }, icon('dice'), 'Shuffle');
-    actions.append(this.artBtn, dice);
+    const reverse = h(
+      'button',
+      { type: 'button', class: 'btn small ghost', title: 'Reverse the order (changes gradient maps and colour cycling)', onclick: () => store.update('palette', (p) => p.palette.reverse()) },
+      '⇄',
+    );
+    const dice = h('button', { type: 'button', class: 'btn small ghost', title: 'Random palette', onclick: () => store.update('palette', (p) => (p.palette = randomPalette())) }, icon('dice'));
+    const save = h('button', { type: 'button', class: 'btn small', title: 'Save these colours as your own palette', onclick: () => this.savePalette() }, 'Save');
+    actions.append(this.artBtn, reverse, dice, save);
     head.appendChild(actions);
     const pal = h('div', { class: 'palette' });
     for (let i = 0; i < 5; i++) {
@@ -165,7 +214,7 @@ export class EffectsPanel {
         'aria-label': `Colour ${i + 1}`,
         oninput: () => store.update('palette', (p) => (p.palette[i] = input.value)),
       });
-      const sw = h('label', { class: 'sw' }, input);
+      const sw = h('label', { class: 'sw', title: 'Click to pick a colour' }, input);
       this.swatches.push(sw);
       pal.appendChild(h('div', null, sw, h('div', { class: 'cap' }, String(i + 1).padStart(2, '0'))));
     }
@@ -175,31 +224,58 @@ export class EffectsPanel {
       'aria-label': 'Background',
       oninput: () => store.update('palette', (p) => (p.background = bgIn.value)),
     });
-    this.bgSwatch = h('label', { class: 'sw' }, bgIn);
+    this.bgSwatch = h('label', { class: 'sw', title: 'Canvas ground colour' }, bgIn);
     pal.appendChild(h('div', null, this.bgSwatch, h('div', { class: 'cap' }, 'Ground')));
-    const list = h(
-      'div',
-      { class: 'palette-list' },
-      PALETTES.map((pp) =>
-        h(
-          'button',
-          {
-            type: 'button',
-            title: pp.name,
-            'aria-label': `${pp.name} palette`,
-            onclick: () =>
-              store.update('palette', (p) => {
-                p.palette = pp.colors.slice();
-                p.background = pp.bg;
-              }),
-          },
-          h('span', { style: `background:${pp.bg}` }),
-          pp.colors.map((c) => h('span', { style: `background:${c}` })),
-        ),
-      ),
-    );
-    wrap.append(head, pal, list);
+    this.paletteList = h('div', { class: 'palette-list' });
+    this.renderPaletteList();
+    wrap.append(head, pal, this.paletteList);
     return wrap;
+  }
+
+  private savePalette(): void {
+    const mine = readMine();
+    const name = `Mine ${String(mine.length + 1).padStart(2, '0')}`;
+    mine.push({ name, colors: store.p.palette.slice(), bg: store.p.background });
+    localStorage.setItem(MY_PALETTES, JSON.stringify(mine));
+    this.renderPaletteList();
+    toast(`Saved “${name}”. It’s in the list below the colours.`);
+  }
+
+  private renderPaletteList(): void {
+    const mine = readMine();
+    const item = (pp: SavedPalette, removable: number | null) => {
+      const b = h(
+        'button',
+        {
+          type: 'button',
+          class: 'pal-chip',
+          title: removable === null ? pp.name : `${pp.name} — right-click to delete`,
+          'aria-label': `${pp.name} palette`,
+          onclick: () =>
+            store.update('palette', (p) => {
+              p.palette = pp.colors.slice();
+              p.background = pp.bg;
+            }),
+        },
+        h('span', { style: `background:${pp.bg}` }),
+        pp.colors.map((c) => h('span', { style: `background:${c}` })),
+      );
+      if (removable !== null) {
+        b.classList.add('mine');
+        b.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          const list = readMine();
+          list.splice(removable, 1);
+          localStorage.setItem(MY_PALETTES, JSON.stringify(list));
+          this.renderPaletteList();
+        });
+      }
+      return b;
+    };
+    this.paletteList.replaceChildren(
+      ...PALETTES.map((pp) => item(pp, null)),
+      ...mine.map((pp, i) => item(pp, i)),
+    );
   }
 
   setArtworkAvailable(v: boolean): void {
@@ -208,11 +284,13 @@ export class EffectsPanel {
 
   sync(): void {
     const p = store.p;
+    const onNames = new Map<string, string[]>();
     for (const e of EFFECTS) {
       const st = p.fx[e.id];
       const refs = this.cards.get(e.id)!;
       refs.check?.set(st.on);
       refs.card.classList.toggle('off', !st.on && !e.alwaysOn);
+      if (st.on && !e.alwaysOn) onNames.set(e.group, [...(onNames.get(e.group) ?? []), e.label]);
       if (refs.drive) {
         const active = st.drive !== 'none' && Math.abs(st.depth) > 0.001;
         refs.drive.classList.toggle('active', active);
@@ -224,6 +302,13 @@ export class EffectsPanel {
         else if (pd.type === 'select') this.selects.get(key)?.(st.p[pd.key] as string);
       }
     }
+    for (const g of GROUPS) {
+      const names = onNames.get(g.id) ?? [];
+      let summary = names.length ? names.join(' · ') : 'All off';
+      if (g.id === 'time') summary = `Hold ${(p.fx.time.p.hold as number).toFixed(1)} s · Fade ${(p.fx.time.p.fade as number).toFixed(1)} s`;
+      if (g.id === 'colour') summary = String(p.fx.colour.p.mode) === 'direct' ? 'Direct' : String(p.fx.colour.p.mode) === 'gradient' ? 'Gradient map' : 'Spectral';
+      this.sections.get(g.id)!.setSummary(summary);
+    }
     for (let i = 0; i < 5; i++) {
       const c = p.palette[i];
       this.swatches[i].style.background = c;
@@ -231,6 +316,9 @@ export class EffectsPanel {
     }
     this.bgSwatch.style.background = p.background;
     (this.bgSwatch.querySelector('input') as HTMLInputElement).value = p.background;
+    // Colour summary shows the palette itself.
+    const colSec = this.sections.get('colour')!;
+    colSec.el.style.setProperty('--sw', `linear-gradient(90deg, ${p.palette.join(',')})`);
   }
 
   /** Called ~30×/s with live features to animate modulation markers and lamps. */

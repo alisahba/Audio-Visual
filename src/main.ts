@@ -5,7 +5,8 @@ import { DEMO_ARTIST, DEMO_TITLE, renderDemo } from './audio/demo';
 import { Recorder } from './export/exporter';
 import { Renderer } from './render/renderer';
 import { SimDriver } from './render/sim';
-import * as spotify from './sources/spotify';
+import { MediaManager } from './media/media';
+import * as scApi from './sources/soundcloud-api';
 import * as soundcloud from './sources/soundcloud';
 import { ASPECTS, aspectRatio } from './state/project';
 import { PRESETS, applyPreset } from './state/presets';
@@ -14,6 +15,7 @@ import { segmented } from './ui/controls';
 import { download, fmtTime, h, icon, toast } from './ui/dom';
 import { EffectsPanel } from './ui/effects-panel';
 import { ExportDialog } from './ui/export-dialog';
+import { mediaPanel } from './ui/media-panel';
 import { paletteFromImage } from './ui/palette';
 import { PresetsMenu } from './ui/presets-menu';
 import { ResponsePanel } from './ui/response-panel';
@@ -68,6 +70,22 @@ const qualitySeg = segmented<number>({
     sizeStage();
   },
 });
+const STAGES = [
+  { id: 'auto', label: 'Auto', title: 'Follows the light / dark theme' },
+  { id: 'white', label: 'White' },
+  { id: 'grey', label: 'Grey' },
+  { id: 'black', label: 'Black' },
+];
+let stageColour = localStorage.getItem('klangbild.stage') ?? 'auto';
+const stageSeg = segmented<string>({
+  options: STAGES.map((s) => ({ value: s.id, label: s.label, title: s.title ?? `${s.label} around the canvas` })),
+  value: stageColour,
+  onChange: (v) => {
+    stageColour = v;
+    localStorage.setItem('klangbild.stage', v);
+    applyStage();
+  },
+});
 const fpsEl = h('span', null, '');
 const resEl = h('span', null, '');
 let snapRequested = false;
@@ -78,6 +96,8 @@ const stageBar = h(
   aspectSeg.el,
   h('span', { class: 'label', style: 'margin-left:8px' }, 'Preview'),
   qualitySeg.el,
+  h('span', { class: 'label', style: 'margin-left:8px' }, 'Stage'),
+  stageSeg.el,
   h('div', { class: 'spacer' }),
   h('div', { class: 'meta' }, resEl, fpsEl),
   h('button', { type: 'button', class: 'btn icon ghost', title: 'Clear the canvas (C)', 'aria-label': 'Clear canvas', onclick: () => resetSim(engine.time, 0) }, icon('clear')),
@@ -85,6 +105,11 @@ const stageBar = h(
   h('button', { type: 'button', class: 'btn icon ghost', title: 'Fullscreen (F)', 'aria-label': 'Fullscreen', onclick: () => toggleFullscreen() }, icon('expand')),
 );
 const stage = h('main', { class: 'stage' }, stageBar, wrap);
+function applyStage(): void {
+  if (stageColour === 'auto') delete stage.dataset.stage;
+  else stage.dataset.stage = stageColour;
+}
+applyStage();
 
 let renderer: Renderer;
 try {
@@ -97,9 +122,23 @@ const sim = new SimDriver(renderer);
 
 // ── Panels ─────────────────────────────────────────────────────────────────
 
-const effects = new EffectsPanel();
-const response = new ResponsePanel();
-const exportDialog = new ExportDialog(engine, () => clipTime(), (ctx, w, hh) => {
+const media = new MediaManager();
+media.on('change', () => (needsRender = true));
+const effects = new EffectsPanel({ media: mediaPanel(media) });
+try {
+  engine.syncMs = Number(localStorage.getItem('klangbild.syncMs') ?? 0) || 0;
+} catch {
+  /* ignore */
+}
+const response = new ResponsePanel(
+  () => engine.syncMs,
+  (ms) => {
+    engine.syncMs = ms;
+    localStorage.setItem('klangbild.syncMs', String(ms));
+  },
+  () => engine.latencyMs,
+);
+const exportDialog = new ExportDialog(engine, media, () => clipTime(), (ctx, w, hh) => {
   // The preview canvas doesn't keep its buffer, so render and copy in one task.
   sim.render(store.p);
   ctx.drawImage(canvas, 0, 0, w, hh);
@@ -119,8 +158,8 @@ const timeline = new Timeline(engine, {
 const source = new SourcePanel(engine, {
   loadFile: (f) => loadFile(f),
   loadDemo: () => loadDemo(true),
-  pickSpotify: (t) => pickSpotify(t),
-  loadSoundCloud: (l) => loadSoundCloud(l),
+  pickSoundCloud: (t) => pickSoundCloud(t),
+  loadSoundCloudLink: (l) => loadSoundCloudLink(l),
   startLive: (k) => startLive(k),
   stopLive: () => engine.stopLive(),
   listenHere: () => listenHere(),
@@ -235,7 +274,8 @@ function toggleHelp(): void {
     ['E', 'Export'],
     ['S', 'Snapshot PNG'],
     ['F', 'Fullscreen'],
-    ['1 – 8', 'Presets'],
+    ['1 – 9, 0', 'Presets'],
+    ['Double-click label', 'Set to zero'],
     ['Ctrl Z', 'Undo (Shift: redo)'],
     ['Shift-drag', 'Fine slider control'],
     ['Double-click', 'Reset slider'],
@@ -415,26 +455,38 @@ engine.on('track', () => {
   if (engine.kind === 'live' && !engine.info?.duration) response.setInfo(0, 0, true);
 });
 
-async function pickSpotify(t: spotify.SpotifyTrack): Promise<void> {
+/** Full mode: fetch and decode the track through the SoundCloud API. */
+async function pickSoundCloud(t: scApi.ScTrack): Promise<void> {
+  source.showTab('soundcloud');
+  source.showEmbed(false);
+  engine.pause();
   try {
-    source.showEmbed(true);
-    engine.pause();
-    const transport = await spotify.createTransport(source.embedHost, t.uri, (dur) => {
-      if (engine.info && Math.abs((engine.info.duration || 0) - dur) > 0.5) {
-        engine.updateExternalInfo({ duration: dur });
-        timeline.refresh();
-      }
-    });
-    engine.attachExternal(transport, { title: t.title, artist: t.artist, duration: t.duration, origin: 'spotify', artwork: t.art, link: t.link });
+    source.setProgress(0.01, 'Loading from SoundCloud');
+    const { buffer, preview } = await scApi.loadAudio(t, engine.ctx, (v) => source.setProgress(v, 'Loading from SoundCloud'));
+    source.setProgress(1);
+    autoClip = true;
+    await engine.loadBuffer(buffer, { title: t.title, artist: t.artist, duration: buffer.duration, origin: 'soundcloud', artwork: t.art, link: t.link }, store.p.audio.beat);
     afterLoad();
-    if (t.art) applyArtworkPalette(t.art, true);
+    toast(preview ? `“${t.title}”: SoundCloud only allows a 30-second preview of this track.` : `Loaded “${t.title}” from SoundCloud.`);
   } catch (err) {
-    source.showEmbed(!!engine.external);
-    toast(String((err as Error).message ?? err), 'error');
+    source.setProgress(0);
+    toast(String((err as Error).message ?? err), 'error', 9000);
   }
 }
 
-async function loadSoundCloud(link: string): Promise<void> {
+async function loadSoundCloudLink(link: string): Promise<void> {
+  if (scApi.isConnected()) {
+    try {
+      const t = await scApi.resolve(link);
+      return pickSoundCloud(t);
+    } catch (err) {
+      toast(`${(err as Error).message} Playing it in SoundCloud’s player instead.`, 'error', 7000);
+    }
+  }
+  return loadSoundCloudWidget(link);
+}
+
+async function loadSoundCloudWidget(link: string): Promise<void> {
   try {
     source.showEmbed(true);
     engine.pause();
@@ -596,7 +648,7 @@ window.addEventListener('keydown', (e) => {
       break;
     }
     default:
-      if (/^[1-8]$/.test(e.key)) presets.applyIndex(Number(e.key) - 1);
+      if (/^[0-9]$/.test(e.key)) presets.applyIndex(e.key === '0' ? 9 : Number(e.key) - 1);
   }
 });
 
@@ -632,7 +684,35 @@ window.addEventListener('drop', (e) => {
 // ── Main loop ──────────────────────────────────────────────────────────────
 
 let lastUi = 0;
+let lastFrame = performance.now();
 let frames = 0;
+let silentSince = 0;
+let silenceWarned = false;
+
+/** Shared audio that never arrives is the usual reason visuals don't react. */
+function watchSilence(now: number): void {
+  const lf = engine.liveFeed;
+  if (!lf || !engine.playing) {
+    silentSince = 0;
+    return;
+  }
+  if (lf.levelDb > -75) {
+    silentSince = 0;
+    silenceWarned = false;
+    return;
+  }
+  if (!silentSince) silentSince = now;
+  if (!silenceWarned && now - silentSince > 3500) {
+    silenceWarned = true;
+    toast(
+      engine.external
+        ? 'No sound is reaching Klangbild. Share again with “This tab” and keep “Share tab audio” switched on — or connect a SoundCloud app for full mode.'
+        : 'No sound is reaching Klangbild. When sharing, tick “Share tab audio” (or “Share system audio”).',
+      'error',
+      9000,
+    );
+  }
+}
 let fpsStamp = performance.now();
 
 const debug = { paused: false };
@@ -646,6 +726,15 @@ function loop(now: number): void {
   engine.liveFeed?.poll(now);
 
   const kind = engine.kind;
+  renderer.media = media.frame(p, clipTime(), engine.playing, now);
+  if (renderer.media && media.kind !== 'image') needsRender = true;
+  watchSilence(now);
+  if (!engine.playing && media.kind === 'camera' && p.fx.media.on) {
+    // Keep the canvas alive for the camera while the music is paused.
+    sim.advanceTo(sim.songTime + Math.min(0.1, (now - lastFrame) / 1000), null, p, 4);
+    needsRender = true;
+  }
+  lastFrame = now;
   if (engine.playing) {
     let t = engine.time;
     if (kind === 'file' || (kind === 'external' && engine.duration) || (kind === 'live' && engine.external)) {
@@ -706,18 +795,8 @@ requestAnimationFrame(loop);
 source.syncTrack();
 timeline.refresh();
 
-spotify
-  .handleRedirect()
-  .then((done) => {
-    if (done) {
-      toast('Connected to Spotify — search away.');
-      source.showTab('spotify');
-    }
-  })
-  .catch((err) => toast(String((err as Error).message ?? err), 'error'));
-
 // Prepare the demo in the background so Space plays instantly.
 void loadDemo(false);
 
 // Expose for debugging / automated checks.
-(window as unknown as Record<string, unknown>).klangbild = { engine, store, sim, renderer, debug };
+(window as unknown as Record<string, unknown>).klangbild = { engine, store, sim, renderer, media, debug };

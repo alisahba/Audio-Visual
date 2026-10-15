@@ -2,6 +2,8 @@ import { clamp, h } from './dom';
 
 export interface RangeOpts {
   label: string;
+  /** Tooltip for the label. */
+  hint?: string;
   min: number;
   max: number;
   step: number;
@@ -156,7 +158,17 @@ export function rangeRow(o: RangeOpts): RangeRow {
   });
 
   render();
-  const row = h('div', { class: 'row' }, h('div', { class: 'label', title: o.label }, o.label), slider, input);
+  const zeroV = Math.min(o.max, Math.max(o.min, 0));
+  const label = h(
+    'div',
+    { class: 'label', title: `${o.hint ? `${o.hint}\n` : ''}Double-click: set to ${fmt(zeroV)} · on the slider: reset to ${fmt(o.def)}` },
+    o.label,
+  );
+  label.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    commit(zeroV);
+  });
+  const row = h('div', { class: 'row' }, label, slider, input);
   return {
     row,
     slider,

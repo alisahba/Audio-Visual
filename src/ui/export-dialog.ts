@@ -1,4 +1,5 @@
 import type { AudioEngine } from '../audio/engine';
+import type { MediaManager } from '../media/media';
 import { pickFolder, runExport, supportsFolderPicker, videoCodecFor, type Destination, type ExportFormat } from '../export/exporter';
 import { aspectRatio } from '../state/project';
 import { store } from '../state/store';
@@ -52,6 +53,7 @@ export class ExportDialog {
 
   constructor(
     private engine: AudioEngine,
+    private media: MediaManager,
     private clipTime: () => number,
     private drawCurrent: (ctx: CanvasRenderingContext2D, w: number, h: number) => void,
   ) {}
@@ -168,7 +170,8 @@ export class ExportDialog {
       const isSeq = s.format === 'png' || s.format === 'jpeg';
       fQual.style.display = s.format === 'mp4' ? '' : 'none';
       fJpeg.style.display = s.format === 'jpeg' ? '' : 'none';
-      fAudio.style.display = s.format === 'mp4' && this.engine.buffer ? '' : 'none';
+      const fromSoundCloud = this.engine.info?.origin === 'soundcloud';
+      fAudio.style.display = s.format === 'mp4' && this.engine.buffer && !fromSoundCloud ? '' : 'none';
       fDest.style.display = isSeq ? '' : 'none';
       fFps.style.display = s.format === 'still' ? 'none' : '';
       if (!supportsFolderPicker()) {
@@ -194,7 +197,13 @@ export class ExportDialog {
       }
       summary.replaceChildren(...rows.flatMap(([k, v]) => [h('dt', null, k), h('dd', null, v)]));
       startBtn.disabled = !offline || !!this.abort;
-      status.textContent = offline ? '' : 'Offline export needs a decoded track (file or demo). For Spotify, SoundCloud or live input, use Record under the timeline.';
+      status.textContent = !offline
+        ? 'Offline export needs a decoded track (a file, the demo, or SoundCloud in full mode). For live input or the SoundCloud player, use Record under the timeline.'
+        : this.engine.info?.origin === 'soundcloud' && s.format === 'mp4'
+          ? 'SoundCloud tracks export as picture only — add the music in your editor.'
+          : this.media.kind === 'camera'
+            ? 'The camera is live: offline export samples it as it renders. For a performance take, use Record.'
+            : '';
       if (s.format === 'mp4') {
         videoCodecFor(W, H, bitrate).then((c) => {
           if (!c && s.format === 'mp4') status.textContent = 'This browser can’t encode video. Use Chrome or Edge, or export an image sequence.';
@@ -241,7 +250,7 @@ export class ExportDialog {
             fps: s.fps,
             bitrate,
             jpegQuality: s.jpeg,
-            includeAudio: s.audio,
+            includeAudio: s.audio && this.engine.info?.origin !== 'soundcloud',
             preroll: s.preroll,
             destination: s.dest,
             stillTime: this.clipTime(),
@@ -266,6 +275,7 @@ export class ExportDialog {
           },
           this.abort.signal,
           dir,
+          await this.media.exporter(store.p),
         );
         bar.style.width = '100%';
         if (res.blob) {

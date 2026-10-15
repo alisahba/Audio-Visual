@@ -98,7 +98,7 @@ export function defaultProject(): Project {
       high: 1,
       attack: 0.02,
       release: 0.25,
-      beat: { lo: 40, hi: 140, sensitivity: 0.55, hold: 220, mode: 'onset', division: 1 },
+      beat: { lo: 40, hi: 140, sensitivity: 0.5, hold: 120, mode: 'onset', division: 1 },
     },
     clip: { start: 0, duration: 30, loop: true, snap: true },
     seed: 7,

@@ -1,25 +1,27 @@
 import type { AudioEngine, TrackInfo } from '../audio/engine';
-import * as spotify from '../sources/spotify';
+import * as scApi from '../sources/soundcloud-api';
 import * as soundcloud from '../sources/soundcloud';
 import { store } from '../state/store';
 import { fmtTime, h, icon, toast } from './dom';
+import { Section } from './section';
 
 export interface SourceActions {
   loadFile(file: File): void;
   loadDemo(): void;
-  pickSpotify(t: spotify.SpotifyTrack): void;
-  loadSoundCloud(link: string): void;
+  /** Full mode: decode a track through the SoundCloud API. */
+  pickSoundCloud(t: scApi.ScTrack): void;
+  /** A pasted link: full mode when connected, otherwise the embedded player. */
+  loadSoundCloudLink(link: string): void;
   startLive(kind: 'mic' | 'tab'): void;
   stopLive(): void;
   listenHere(): void;
 }
 
-type Tab = 'file' | 'spotify' | 'soundcloud' | 'live';
+type Tab = 'file' | 'soundcloud' | 'live';
 
 const ORIGIN_LABEL: Record<string, string> = {
   demo: 'Demo',
   file: 'Local file',
-  spotify: 'Spotify',
   soundcloud: 'SoundCloud',
   mic: 'Microphone',
   tab: 'Shared audio',
@@ -28,12 +30,14 @@ const ORIGIN_LABEL: Record<string, string> = {
 export class SourcePanel {
   readonly el: HTMLElement;
   readonly embedHost: HTMLElement;
+  readonly section: Section;
   private art: HTMLElement;
   private titleEl: HTMLElement;
   private artistEl: HTMLElement;
   private metaEl: HTMLElement;
   private progress: HTMLElement;
   private bar: HTMLElement;
+  private progressLabel: HTMLElement;
   private tabs: Record<Tab, HTMLButtonElement> = {} as Record<Tab, HTMLButtonElement>;
   private bodies: Record<Tab, HTMLElement> = {} as Record<Tab, HTMLElement>;
   private embedWrap: HTMLElement;
@@ -42,6 +46,7 @@ export class SourcePanel {
   private liveStatus: HTMLElement;
   private stopBtn: HTMLButtonElement;
   private fileInput: HTMLInputElement;
+  private renderSc: () => void = () => {};
 
   constructor(
     private engine: AudioEngine,
@@ -52,7 +57,8 @@ export class SourcePanel {
     this.artistEl = h('div', { class: 't-artist' }, '');
     this.metaEl = h('div', { class: 't-meta' }, '');
     this.bar = h('i');
-    this.progress = h('div', { class: 'progress', style: 'display:none' }, this.bar);
+    this.progressLabel = h('span', { class: 'progress-label' }, '');
+    this.progress = h('div', { class: 'progress-wrap', style: 'display:none' }, h('div', { class: 'progress' }, this.bar), this.progressLabel);
     this.fileInput = h('input', {
       type: 'file',
       accept: 'audio/*,.mp3,.wav,.aif,.aiff,.flac,.ogg,.m4a,.aac,.opus,.webm',
@@ -66,11 +72,7 @@ export class SourcePanel {
 
     this.embedHost = h('div', { class: 'embed' });
     this.listenBtn = h('button', { type: 'button', class: 'btn primary', onclick: () => act.listenHere() }, icon('screen'), 'Listen to this tab') as HTMLButtonElement;
-    this.listenNote = h(
-      'div',
-      { class: 'note' },
-      'The player’s audio can’t be read directly, so Klangbild listens to this browser tab. Press play (or Listen), then choose “This tab” and keep “Share tab audio” ticked.',
-    );
+    this.listenNote = h('div', { class: 'note' });
     this.embedWrap = h('div', { class: 'stack', style: 'display:none;margin-top:12px' }, this.embedHost, this.listenBtn, this.listenNote);
 
     this.liveStatus = h('div', { class: 'note' }, 'Not listening.');
@@ -79,9 +81,8 @@ export class SourcePanel {
     const tabBar = h('div', { class: 'tabs', role: 'tablist' });
     const labels: [Tab, string][] = [
       ['file', 'File'],
-      ['spotify', 'Spotify'],
       ['soundcloud', 'SoundCloud'],
-      ['live', 'Live'],
+      ['live', 'Live input'],
     ];
     for (const [id, label] of labels) {
       const b = h('button', { type: 'button', role: 'tab', onclick: () => this.showTab(id) }, label) as HTMLButtonElement;
@@ -89,26 +90,24 @@ export class SourcePanel {
       tabBar.appendChild(b);
     }
     this.bodies.file = this.fileTab();
-    this.bodies.spotify = this.spotifyTab();
     this.bodies.soundcloud = this.soundcloudTab();
     this.bodies.live = this.liveTab();
 
-    this.el = h(
-      'section',
-      { class: 'sec', id: 'sec-source' },
-      h('div', { class: 'sec-head' }, h('span', { class: 'num' }, '01'), h('span', { class: 'title' }, 'Source'), h('span', { class: 'hint' }, 'What you are listening to')),
+    this.section = new Section('source', '01', 'Source', 'What you are listening to');
+    this.section.body.append(
       h('div', { class: 'track' }, this.art, h('div', { style: 'min-width:0' }, this.titleEl, this.artistEl, this.metaEl)),
       this.progress,
       tabBar,
-      Object.values(this.bodies),
+      ...Object.values(this.bodies),
       this.embedWrap,
       this.fileInput,
     );
+    this.el = this.section.el;
     this.showTab('file');
     engine.on('track', () => this.syncTrack());
     engine.on('analysis', () => this.syncTrack());
     engine.on('state', () => this.syncLive());
-    engine.on('progress', (v) => this.setProgress(v as number));
+    engine.on('progress', (v) => this.setProgress(v as number, 'Analysing'));
     store.on((t) => {
       if (t === 'palette' || t === 'all') this.syncArt();
     });
@@ -141,72 +140,69 @@ export class SourcePanel {
     );
   }
 
-  private spotifyTab(): HTMLElement {
+  private soundcloudTab(): HTMLElement {
     const results = h('div', { class: 'results' });
-    const q = h('input', { class: 'textin', type: 'search', placeholder: 'Search tracks or artists', 'aria-label': 'Search Spotify' }) as HTMLInputElement;
-    const link = h('input', { class: 'textin', type: 'text', placeholder: 'open.spotify.com/track/…', 'aria-label': 'Spotify track link' }) as HTMLInputElement;
-    const cid = h('input', { class: 'textin', type: 'text', placeholder: 'Client ID', value: spotify.clientId(), 'aria-label': 'Spotify Client ID' }) as HTMLInputElement;
+    const q = h('input', { class: 'textin', type: 'search', placeholder: 'Search SoundCloud', 'aria-label': 'Search SoundCloud' }) as HTMLInputElement;
+    const link = h('input', { class: 'textin', type: 'text', placeholder: 'Paste a soundcloud.com track link', 'aria-label': 'SoundCloud track link' }) as HTMLInputElement;
+    const cid = h('input', { class: 'textin', type: 'text', placeholder: 'Client ID', autocomplete: 'off', 'aria-label': 'SoundCloud Client ID' }) as HTMLInputElement;
+    const secret = h('input', { class: 'textin', type: 'password', placeholder: 'Client secret', autocomplete: 'off', 'aria-label': 'SoundCloud Client secret' }) as HTMLInputElement;
     const searchBox = h('div', { class: 'stack' });
     const connectBox = h('div', { class: 'stack' });
+    for (const i of [q, link, cid, secret]) i.addEventListener('keydown', (e) => e.stopPropagation());
 
     const runSearch = async () => {
       const term = q.value.trim();
       if (!term) return;
+      if (!scApi.isConnected()) {
+        window.open(`https://soundcloud.com/search/sounds?q=${encodeURIComponent(term)}`, '_blank', 'noopener');
+        return;
+      }
       results.replaceChildren(h('div', { class: 'note', style: 'padding:8px 0' }, 'Searching…'));
       try {
-        const items = await spotify.search(term);
+        const items = await scApi.search(term);
         results.replaceChildren(
           ...(items.length
             ? items.map((t) =>
                 h(
                   'button',
-                  { type: 'button', class: 'result', onclick: () => this.act.pickSpotify(t) },
-                  h('img', { src: t.artSmall ?? '', alt: '', loading: 'lazy' }),
-                  h('div', { style: 'min-width:0' }, h('div', { class: 'r-title' }, t.title), h('div', { class: 'r-sub' }, `${t.artist} — ${t.album}`)),
-                  h('span', { class: 'muted' }, fmtTime(t.duration, 0)),
+                  { type: 'button', class: `result ${t.access === 'blocked' ? 'blocked' : ''}`, title: t.access === 'blocked' ? 'Not streamable outside SoundCloud' : `Load “${t.title}”`, onclick: () => this.act.pickSoundCloud(t) },
+                  h('img', { src: t.art ?? '', alt: '', loading: 'lazy' }),
+                  h('div', { style: 'min-width:0' }, h('div', { class: 'r-title' }, t.title), h('div', { class: 'r-sub' }, t.artist)),
+                  h('span', { class: 'r-meta' }, t.access === 'preview' ? h('em', null, 'Preview') : null, fmtTime(t.duration, 0)),
                 ),
               )
             : [h('div', { class: 'note', style: 'padding:8px 0' }, 'No results.')]),
         );
       } catch (err) {
         results.replaceChildren();
-        toast(String((err as Error).message ?? err), 'error');
-        render();
+        toast(String((err as Error).message ?? err), 'error', 7000);
+        this.renderSc();
       }
     };
-    q.addEventListener('keydown', (e) => {
-      e.stopPropagation();
-      if (e.key === 'Enter') runSearch();
-    });
-    const loadLink = async () => {
-      const id = spotify.parseLink(link.value);
-      if (!id) return toast('That doesn’t look like a Spotify track link.', 'error');
-      const meta = await spotify.oembed(id);
-      this.act.pickSpotify({ id, uri: `spotify:track:${id}`, title: meta.title, artist: 'Spotify', album: '', duration: 0, art: meta.art, link: `https://open.spotify.com/track/${id}` });
+    q.addEventListener('keydown', (e) => e.key === 'Enter' && runSearch());
+    const loadLink = () => {
+      if (!soundcloud.isLink(link.value)) return toast('Paste a soundcloud.com track link.', 'error');
+      this.act.loadSoundCloudLink(link.value);
     };
-    link.addEventListener('keydown', (e) => {
-      e.stopPropagation();
-      if (e.key === 'Enter') loadLink();
-    });
-    cid.addEventListener('keydown', (e) => e.stopPropagation());
+    link.addEventListener('keydown', (e) => e.key === 'Enter' && loadLink());
 
     const render = () => {
-      const connected = spotify.isConnected();
-      searchBox.style.display = connected ? '' : 'none';
+      const connected = scApi.isConnected();
+      q.placeholder = connected ? 'Search SoundCloud' : 'Find on SoundCloud (opens a new tab)';
       connectBox.replaceChildren(
         ...(connected
           ? [
               h(
                 'div',
                 { class: 'hstack' },
-                h('span', { class: 'note grow' }, 'Connected to Spotify.'),
+                h('span', { class: 'note grow' }, h('b', null, 'Full mode. '), 'Tracks load in full: waveform, beats, drop finder and frame-accurate export.'),
                 h(
                   'button',
                   {
                     type: 'button',
                     class: 'btn small ghost',
                     onclick: () => {
-                      spotify.disconnect();
+                      scApi.disconnect();
                       render();
                     },
                   },
@@ -215,40 +211,45 @@ export class SourcePanel {
               ),
             ]
           : [
-              h('div', { class: 'sub-head', style: 'margin-top:6px' }, h('span', null, 'Connect for search')),
+              h('div', { class: 'sub-head', style: 'margin-top:8px' }, h('span', null, 'Full mode (recommended)')),
               h(
                 'div',
                 { class: 'note' },
-                'Search uses your own free Spotify developer app. Create one at ',
-                h('a', { href: 'https://developer.spotify.com/dashboard', target: '_blank', rel: 'noopener' }, 'developer.spotify.com'),
-                ', tick “Web API”, add this Redirect URI, then paste the Client ID:',
+                'Register a free app at ',
+                h('a', { href: 'https://soundcloud.com/you/apps', target: '_blank', rel: 'noopener' }, 'soundcloud.com/you/apps'),
+                ' and paste its Client ID and secret. Klangbild then loads the real audio, so tracks get the full waveform, beat detection and export. The keys stay in this browser only.',
               ),
-              h('div', { class: 'note' }, h('code', null, spotify.redirectUri())),
+              cid,
               h(
                 'div',
                 { class: 'hstack' },
-                h('div', { class: 'grow' }, cid),
+                h('div', { class: 'grow' }, secret),
                 h(
                   'button',
                   {
                     type: 'button',
                     class: 'btn',
                     onclick: async () => {
-                      if (!cid.value.trim()) return toast('Paste your Client ID first.', 'error');
-                      spotify.setClientId(cid.value);
+                      if (!cid.value.trim() || !secret.value.trim()) return toast('Paste both the Client ID and the secret.', 'error');
+                      scApi.saveCredentials(cid.value, secret.value);
                       try {
-                        await spotify.login();
+                        await scApi.search('test');
+                        toast('Connected to SoundCloud.');
                       } catch (err) {
-                        toast(String((err as Error).message), 'error');
+                        scApi.disconnect();
+                        toast(String((err as Error).message), 'error', 7000);
                       }
+                      render();
                     },
                   },
                   'Connect',
                 ),
               ),
+              h('div', { class: 'note' }, 'Without connecting, a pasted link plays in SoundCloud’s own player and Klangbild listens to this browser tab.'),
             ]),
       );
     };
+    this.renderSc = render;
     searchBox.append(h('div', { class: 'hstack' }, h('div', { class: 'grow' }, q), h('button', { type: 'button', class: 'btn icon', 'aria-label': 'Search', onclick: runSearch }, icon('search'))), results);
     render();
     return h(
@@ -257,35 +258,6 @@ export class SourcePanel {
       searchBox,
       h('div', { class: 'hstack' }, h('div', { class: 'grow' }, link), h('button', { type: 'button', class: 'btn', onclick: loadLink }, 'Load')),
       connectBox,
-      h('div', { class: 'note' }, 'Logged out of Spotify in this browser, the player gives 30-second previews.'),
-    );
-  }
-
-  private soundcloudTab(): HTMLElement {
-    const link = h('input', { class: 'textin', type: 'text', placeholder: 'soundcloud.com/artist/track', 'aria-label': 'SoundCloud track link' }) as HTMLInputElement;
-    const q = h('input', { class: 'textin', type: 'search', placeholder: 'Find on SoundCloud', 'aria-label': 'Search SoundCloud' }) as HTMLInputElement;
-    const load = () => {
-      if (!soundcloud.isLink(link.value)) return toast('Paste a soundcloud.com track link.', 'error');
-      this.act.loadSoundCloud(link.value);
-    };
-    const find = () => {
-      if (!q.value.trim()) return;
-      window.open(`https://soundcloud.com/search/sounds?q=${encodeURIComponent(q.value.trim())}`, '_blank', 'noopener');
-    };
-    link.addEventListener('keydown', (e) => {
-      e.stopPropagation();
-      if (e.key === 'Enter') load();
-    });
-    q.addEventListener('keydown', (e) => {
-      e.stopPropagation();
-      if (e.key === 'Enter') find();
-    });
-    return h(
-      'div',
-      { class: 'stack' },
-      h('div', { class: 'hstack' }, h('div', { class: 'grow' }, link), h('button', { type: 'button', class: 'btn', onclick: load }, 'Load')),
-      h('div', { class: 'hstack' }, h('div', { class: 'grow' }, q), h('button', { type: 'button', class: 'btn icon', 'aria-label': 'Open SoundCloud search', title: 'Opens SoundCloud search in a new tab', onclick: find }, icon('search'))),
-      h('div', { class: 'note' }, 'Search opens SoundCloud in a new tab — copy the track link from there and paste it above.'),
     );
   }
 
@@ -304,7 +276,7 @@ export class SourcePanel {
       h(
         'div',
         { class: 'note' },
-        'Play music anywhere — the Spotify desktop app, a YouTube tab — then share it here. In Chrome or Edge on Windows, choose “Entire screen” and tick “Share system audio”; for a single tab, tick “Share tab audio”.',
+        'Play music anywhere — a music app, a YouTube tab — then share it here. In Chrome or Edge on Windows choose “Entire screen” and tick “Share system audio”; for one tab, tick “Share tab audio”.',
       ),
     );
   }
@@ -319,15 +291,25 @@ export class SourcePanel {
     this.stopBtn.style.display = listening ? '' : 'none';
     this.liveStatus.textContent = listening ? `Listening to ${ORIGIN_LABEL[this.engine.info?.origin ?? 'tab']?.toLowerCase() ?? 'input'}.` : 'Not listening.';
     this.listenBtn.style.display = this.engine.external && !listening ? '' : 'none';
-    this.listenNote.textContent = listening
-      ? 'Listening to this tab. Use the transport below — the player follows the clip.'
-      : 'The player’s audio can’t be read directly, so Klangbild listens to this browser tab. Press play (or Listen), then choose “This tab” and keep “Share tab audio” ticked.';
+    this.listenNote.replaceChildren(
+      ...(listening
+        ? ['Listening to this tab. Use the transport below — the player follows the clip.']
+        : [
+            h('b', null, 'To drive the visuals: '),
+            'press play (or Listen), choose ',
+            h('b', null, 'This tab'),
+            ' in the browser dialog and keep ',
+            h('b', null, 'Share tab audio'),
+            ' on. Connect a SoundCloud app above to skip this step.',
+          ]),
+    );
   }
 
-  setProgress(v: number): void {
+  setProgress(v: number, label = 'Loading'): void {
     const on = v > 0 && v < 1;
     this.progress.style.display = on ? '' : 'none';
     this.bar.style.width = `${Math.round(v * 100)}%`;
+    this.progressLabel.textContent = on ? `${label} ${Math.round(v * 100)}%` : '';
   }
 
   private syncArt(): void {
@@ -354,6 +336,7 @@ export class SourcePanel {
     if (an) parts.push(`${an.bpm.toFixed(0)} BPM`);
     else if (this.engine.analysing) parts.push('Analysing…');
     this.metaEl.textContent = parts.join(' · ');
+    this.section.setSummary(info?.title ?? '');
     this.syncArt();
     this.syncLive();
   }

@@ -28,6 +28,8 @@ export class Timeline {
   private clipDirty = true;
   private playBtn: HTMLButtonElement;
   private clockEl: HTMLElement;
+  private clockNow = h('span', { class: 'now' });
+  private clockTotal = h('small');
   private lenInput: HTMLInputElement;
   private lenSeg: { el: HTMLElement; set: (v: number) => void };
   private hlWrap: HTMLElement;
@@ -53,7 +55,7 @@ export class Timeline {
     this.songTip = h('div', { class: 'tip' });
     this.clipTip = h('div', { class: 'tip' });
     this.playBtn = h('button', { type: 'button', class: 'play', title: 'Play / pause (Space)', 'aria-label': 'Play', onclick: () => act.togglePlay() }, icon('play')) as HTMLButtonElement;
-    this.clockEl = h('div', { class: 'clock', 'aria-live': 'off' });
+    this.clockEl = h('div', { class: 'clock', 'aria-live': 'off' }, this.clockNow, this.clockTotal);
     this.lenInput = h('input', { class: 'len-input', type: 'text', 'aria-label': 'Clip length in seconds' }) as HTMLInputElement;
     this.lenSeg = segmented<number>({
       options: [10, 15, 30, 60].map((v) => ({ value: v, label: String(v) })),
@@ -318,7 +320,11 @@ export class Timeline {
   tick(clipTime: number, f: Features): void {
     const dur = store.p.clip.duration;
     const live = this.engine.kind === 'live' && !this.engine.info?.duration;
-    this.clockEl.replaceChildren(fmtTime(clipTime), h('small', null, live ? 'live' : `/ ${fmtTime(dur)}`));
+    // Update text in place; fixed-width spans keep the transport from shifting.
+    const now = fmtTime(Math.max(0, clipTime));
+    const total = live ? 'live' : `/ ${fmtTime(dur)}`;
+    if (this.clockNow.textContent !== now) this.clockNow.textContent = now;
+    if (this.clockTotal.textContent !== total) this.clockTotal.textContent = total;
     if (live || (!this.engine.analysis && this.engine.playing)) {
       this.history.push(f.level);
       if (this.history.length > 2400) this.history.shift();
