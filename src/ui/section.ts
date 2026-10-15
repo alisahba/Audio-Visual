@@ -14,17 +14,25 @@ function readFolds(): Record<string, boolean> {
 
 const all = new Map<string, Section>();
 
+export interface SectionOpts {
+  /** Adds a master switch to the header; called when it is flipped. */
+  onSwitch?: (on: boolean) => void;
+  switchHint?: string;
+}
+
 export class Section {
   readonly el: HTMLElement;
   readonly body: HTMLElement;
   private summaryEl: HTMLElement;
   private head: HTMLElement;
+  private switchEl: HTMLButtonElement | null = null;
 
   constructor(
     readonly id: string,
     num: string,
     title: string,
     hint: string,
+    opts: SectionOpts = {},
   ) {
     this.summaryEl = h('span', { class: 'summary' });
     const chevron = icon('caret');
@@ -38,7 +46,25 @@ export class Section {
       chevron,
     );
     this.body = h('div', { class: 'sec-body' }, h('div', { class: 'sec-hint' }, hint));
-    this.el = h('section', { class: 'sec', id: `sec-${id}`, 'data-sec': id }, this.head, this.body);
+    const top = h('div', { class: 'sec-top' }, this.head);
+    if (opts.onSwitch) {
+      const onSwitch = opts.onSwitch;
+      this.switchEl = h(
+        'button',
+        {
+          type: 'button',
+          class: 'sec-switch',
+          role: 'switch',
+          'aria-checked': 'true',
+          'aria-label': `${title} on or off`,
+          title: opts.switchHint ?? `Switch every ${title} effect off at once; switching back restores the ones you had on`,
+          onclick: () => onSwitch(!this.switchedOn),
+        },
+        h('i'),
+      ) as HTMLButtonElement;
+      top.appendChild(this.switchEl);
+    }
+    this.el = h('section', { class: 'sec', id: `sec-${id}`, 'data-sec': id }, top, this.body);
     this.head.addEventListener('click', (e) => {
       if (e.altKey) {
         for (const s of all.values()) if (s.el.parentElement === this.el.parentElement) s.setOpen(s === this);
@@ -63,6 +89,17 @@ export class Section {
     } catch {
       /* ignore */
     }
+  }
+
+  get switchedOn(): boolean {
+    return this.switchEl?.getAttribute('aria-checked') !== 'false';
+  }
+
+  /** Reflect the master switch; a switched-off section is dimmed but stays editable. */
+  setSwitch(on: boolean): void {
+    if (!this.switchEl) return;
+    this.switchEl.setAttribute('aria-checked', String(on));
+    this.el.classList.toggle('bypassed', !on);
   }
 
   setSummary(text: string): void {

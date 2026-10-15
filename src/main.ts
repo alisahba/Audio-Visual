@@ -2,6 +2,7 @@ import './styles.css';
 import { findHighlights } from './audio/analysis';
 import { AudioEngine } from './audio/engine';
 import { DEMO_ARTIST, DEMO_TITLE, renderDemo } from './audio/demo';
+import { METRONOME_TITLE, clampBpm, renderMetronome, type MetronomeSettings } from './audio/metronome';
 import { Recorder } from './export/exporter';
 import { Renderer } from './render/renderer';
 import { SimDriver } from './render/sim';
@@ -15,6 +16,7 @@ import { segmented } from './ui/controls';
 import { download, fmtTime, h, icon, toast } from './ui/dom';
 import { EffectsPanel } from './ui/effects-panel';
 import { ExportDialog } from './ui/export-dialog';
+import { UI_SCALES, installLayout } from './ui/layout';
 import { mediaPanel } from './ui/media-panel';
 import { paletteFromImage } from './ui/palette';
 import { PresetsMenu } from './ui/presets-menu';
@@ -163,6 +165,8 @@ const source = new SourcePanel(engine, {
   startLive: (k) => startLive(k),
   stopLive: () => engine.stopLive(),
   listenHere: () => listenHere(),
+  metronome: (m) => void useMetronome(m),
+  tap: () => tapTempo(),
 });
 const left = h('aside', { class: 'panel left', 'aria-label': 'Source and response' }, source.el, response.el);
 
@@ -209,6 +213,7 @@ const top = h(
     h('button', { type: 'button', class: 'btn icon ghost', title: 'Open project (.json)', 'aria-label': 'Open project', onclick: () => fileInput.click() }, icon('open')),
     h('button', { type: 'button', class: 'btn icon ghost', title: 'Save project (.json)', 'aria-label': 'Save project', onclick: () => saveProject() }, icon('save')),
     h('button', { type: 'button', class: 'btn icon ghost', title: 'Keyboard shortcuts (?)', 'aria-label': 'Help', onclick: () => toggleHelp() }, icon('help')),
+    h('button', { type: 'button', class: 'btn icon ghost size-btn', title: 'Interface size', 'aria-label': 'Interface size', onclick: (e: Event) => openSizePop(e.currentTarget as HTMLElement) }, 'Aa'),
     themeBtn,
     presetsBtn,
     h('button', { type: 'button', class: 'btn primary', onclick: () => openExport() }, 'Export', h('span', { class: 'kbd', style: 'color:inherit;opacity:.6' }, 'E')),
@@ -217,6 +222,34 @@ const top = h(
 );
 
 app.append(top, left, stage, effects.el, timeline.el);
+const layout = installLayout(app, left, effects.el, () => timeline.refresh());
+
+function openSizePop(anchor: HTMLElement): void {
+  document.querySelector('.pop.size-pop')?.remove();
+  const seg = segmented<number>({
+    options: UI_SCALES.map((v) => ({ value: v, label: `${Math.round(v * 100)}%` })),
+    value: layout.scale(),
+    onChange: (v) => layout.setScale(v),
+  });
+  const pop = h(
+    'div',
+    { class: 'pop size-pop', role: 'dialog', 'aria-label': 'Interface size' },
+    h('div', { class: 'pop-title' }, h('span', null, 'Interface size')),
+    seg.el,
+    h('div', { class: 'note' }, 'Scales the panels, text and buttons; the canvas keeps its resolution. Drag the edge of either side panel to make it wider (double-click the edge to reset).'),
+  );
+  document.body.appendChild(pop);
+  const r = anchor.getBoundingClientRect();
+  pop.style.top = `${r.bottom + 6}px`;
+  pop.style.left = `${Math.max(8, r.right - pop.offsetWidth)}px`;
+  const outside = (e: PointerEvent) => {
+    if (!pop.contains(e.target as Node) && !anchor.contains(e.target as Node)) {
+      pop.remove();
+      document.removeEventListener('pointerdown', outside, true);
+    }
+  };
+  setTimeout(() => document.addEventListener('pointerdown', outside, true), 0);
+}
 
 // ── Sizing ─────────────────────────────────────────────────────────────────
 
@@ -270,6 +303,7 @@ function toggleHelp(): void {
     ['Space', 'Play / pause'],
     ['R', 'Back to clip start, fresh canvas'],
     ['C', 'Clear canvas'],
+    ['T', 'Tap tempo (metronome)'],
     ['← →', 'Seek 1 s (Shift: 5 s)'],
     ['E', 'Export'],
     ['S', 'Snapshot PNG'],
@@ -503,6 +537,106 @@ async function loadSoundCloudWidget(link: string): Promise<void> {
   }
 }
 
+// ── Metronome ──────────────────────────────────────────────────────────────
+
+const PATTERN_LABEL = { groove: 'Groove', pulse: 'Pulse', click: 'Click' } as const;
+let metroLoading: Promise<void> | null = null;
+
+/**
+ * Make the metronome the source, or re-render it after a change. While it
+ * plays, the position carries over in beats so the visuals don't restart.
+ */
+async function useMetronome(m: MetronomeSettings, at?: () => number): Promise<void> {
+  const was = engine.info?.origin === 'metronome';
+  const playing = was && engine.playing;
+  const oldBpm = was ? (engine.analysis?.bpm ?? m.bpm) : m.bpm;
+  const pos = engine.time;
+  const job = (async () => {
+    source.showTab('metro');
+    source.showEmbed(false);
+    const buf = renderMetronome(engine.ctx.sampleRate, m);
+    await engine.loadBuffer(buf, { title: METRONOME_TITLE, artist: `${m.bpm} BPM · ${PATTERN_LABEL[m.pattern]}`, duration: buf.duration, origin: 'metronome' }, store.p.audio.beat, m.bpm);
+    engine.setMonitor(m.audible);
+    // Whole bars, so the loop stays in time with the beat.
+    const bar = (4 * 60) / m.bpm;
+    const D = engine.duration;
+    store.update('clip', (p) => {
+      p.clip.duration = Math.max(1, Math.round(Math.min(p.clip.duration, D) / bar)) * bar;
+      p.clip.start = Math.max(0, Math.min(Math.floor((D - p.clip.duration) / bar) * bar, Math.round(p.clip.start / bar) * bar));
+    }, { history: false });
+    timeline.refresh();
+    splash.classList.remove('show');
+    const c = store.p.clip;
+    let t = at ? at() : was ? (pos * oldBpm) / m.bpm : c.start;
+    if (t < c.start || t >= c.start + c.duration) t = c.start + ((((t - c.start) % c.duration) + c.duration) % c.duration);
+    if (playing || !was || at) {
+      await engine.play(t);
+      if (!was) resetSim(t);
+    } else engine.seek(t);
+  })();
+  metroLoading = job;
+  try {
+    await job;
+  } catch (err) {
+    toast(`Metronome failed: ${(err as Error).message}`, 'error');
+  } finally {
+    if (metroLoading === job) metroLoading = null;
+  }
+}
+
+const taps: number[] = [];
+let tapTimer = 0;
+/**
+ * Tap tempo. After four taps the tempo is set; the first tap of a run counts as
+ * beat one, and the metronome is lined up so its beats land on the taps.
+ */
+function tapTempo(): number | null {
+  const now = performance.now();
+  if (taps.length && now - taps[taps.length - 1] > 2200) taps.length = 0;
+  taps.push(now);
+  if (taps.length < 4) {
+    toast(`Tap ${4 - taps.length} more…`, 'info', 900);
+    return null;
+  }
+  // Least-squares fit of tap times against beat numbers.
+  const n = taps.length;
+  let sx = 0;
+  let sy = 0;
+  let sxx = 0;
+  let sxy = 0;
+  for (let i = 0; i < n; i++) {
+    sx += i;
+    sy += taps[i];
+    sxx += i * i;
+    sxy += i * taps[i];
+  }
+  const period = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+  if (!(period > 0)) return null;
+  const raw = 60000 / period;
+  const bpm = clampBpm(Math.abs(raw - Math.round(raw)) < 0.35 ? Math.round(raw) : raw);
+  const lastBeat = n - 1;
+  const lastTap = taps[n - 1];
+  const settings = { ...source.metro, bpm };
+  // Song position for "now": a whole number of bars after zero, plus the beats tapped since beat one.
+  const at = () => {
+    const beat = 60 / bpm;
+    const bar = 4 * beat;
+    const since = (performance.now() - lastTap) / 1000;
+    const c = store.p.clip;
+    const offset = (lastBeat % 4) * beat + since;
+    const bars = Math.max(0, Math.ceil((c.start - offset) / bar));
+    return bars * bar + offset;
+  };
+  // Apply once the taps stop, so tapping isn't interrupted by re-rendering.
+  clearTimeout(tapTimer);
+  tapTimer = window.setTimeout(() => {
+    const same = engine.info?.origin === 'metronome' && engine.analysis?.bpm === bpm && !metroLoading;
+    if (same) void engine.play(at());
+    else void useMetronome(settings, at);
+  }, 650);
+  return bpm;
+}
+
 function reportCaptureError(err: unknown): void {
   const e = err as Error;
   if (e?.name === 'NotAllowedError') toast('Sharing was cancelled — the visuals need the audio to react.', 'error');
@@ -615,6 +749,10 @@ window.addEventListener('keydown', (e) => {
     case 'r':
     case 'R':
       restart();
+      break;
+    case 't':
+    case 'T':
+      source.tapNow();
       break;
     case 'c':
     case 'C':

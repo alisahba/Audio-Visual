@@ -7,7 +7,7 @@
   --panel-2: #efeee9;
   --ink: #121212;
   --ink-2: #5a5a57;
-  --ink-3: #96958f;
+  --ink-3: #85847e;
   --rule: #d9d8d2;
   --rule-2: #c3c2bb;
   --stage: #dfded8;
@@ -27,7 +27,7 @@
   --panel-2: #191919;
   --ink: #efeee9;
   --ink-2: #9c9b96;
-  --ink-3: #5e5d59;
+  --ink-3: #74736e;
   --rule: #242424;
   --rule-2: #353535;
   --stage: #070707;
@@ -80,12 +80,79 @@ button {
 .app {
   display: grid;
   height: 100vh;
-  grid-template-columns: 296px minmax(0, 1fr) 340px;
-  grid-template-rows: 52px minmax(0, 1fr) auto;
+  grid-template-columns: var(--left-w, 296px) minmax(0, 1fr) var(--right-w, 340px);
+  grid-template-rows: calc(52px * var(--ui-zoom, 1)) minmax(0, 1fr) auto;
   grid-template-areas:
     'top top top'
     'left stage right'
     'time time time';
+}
+
+/* Interface size: the chrome scales, the canvas keeps its own resolution. */
+.app.zoomed > .top,
+.app.zoomed > .panel,
+.app.zoomed > .timeline,
+.app.zoomed .stage-bar {
+  zoom: var(--ui-zoom, 1);
+}
+
+.app.zoomed > .top {
+  height: 52px;
+}
+
+/* ── Panel resizers ──────────────────────────────────────────────────── */
+
+.resizer {
+  grid-row: 2;
+  position: relative;
+  z-index: 30;
+  width: 11px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.resizer.left {
+  grid-column: 1;
+  justify-self: end;
+  margin-right: -6px;
+}
+
+.resizer.right {
+  grid-column: 3;
+  justify-self: start;
+  margin-left: -6px;
+}
+
+.resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  width: 1px;
+  background: transparent;
+  transition: background 0.12s, box-shadow 0.12s;
+}
+
+.resizer:hover::after,
+.resizer.drag::after,
+.resizer:focus-visible::after {
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.resizer:focus-visible {
+  outline: none;
+}
+
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.resizing .stage,
+body.resizing .panel {
+  pointer-events: none;
 }
 
 /* ── Top bar ─────────────────────────────────────────────────────────── */
@@ -120,7 +187,7 @@ button {
 }
 
 .brand .sub {
-  font-size: 10px;
+  font-size: 10.5px;
   color: var(--ink-3);
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -215,7 +282,7 @@ button {
 }
 
 .btn .kbd {
-  font-size: 9.5px;
+  font-size: 10.5px;
   color: var(--ink-3);
   margin-left: 2px;
 }
@@ -252,11 +319,80 @@ button {
   flex: none;
 }
 
+.sec-top {
+  display: flex;
+  align-items: stretch;
+}
+
+.sec-switch {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 0 12px 0 4px;
+}
+
+.sec-switch i {
+  position: relative;
+  width: 26px;
+  height: 14px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  transition: background 0.15s;
+}
+
+.sec-switch i::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 14px;
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+  transition: left 0.15s, background 0.15s;
+}
+
+.sec-switch[aria-checked='false'] i {
+  background: transparent;
+  border-color: var(--rule-2);
+}
+
+.sec-switch[aria-checked='false'] i::after {
+  left: 2px;
+  background: var(--ink-3);
+}
+
+.sec-switch:hover i {
+  border-color: var(--accent);
+}
+
+.sec-switch:focus-visible {
+  outline: 1.5px solid var(--accent);
+  outline-offset: -3px;
+}
+
+.sec.bypassed .sec-body {
+  opacity: 0.42;
+}
+
+.sec.bypassed .sec-head .title {
+  color: var(--ink-3);
+}
+
+.sec.bypassed .sec-head .num {
+  background: var(--ink-3);
+}
+
+.sec-nav button.off {
+  text-decoration: line-through;
+  color: var(--ink-3);
+}
+
 .sec-head {
   display: flex;
   align-items: center;
   gap: 10px;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 11px 12px 11px 12px;
   text-align: left;
   user-select: none;
@@ -369,7 +505,7 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 10px;
+  font-size: 10.5px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-2);
@@ -381,7 +517,7 @@ button {
 }
 
 .label {
-  font-size: 10px;
+  font-size: 10.5px;
   letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--ink-2);
@@ -681,7 +817,7 @@ button {
   height: 18px;
   padding: 0 6px;
   border: 1px solid var(--rule-2);
-  font-size: 9.5px;
+  font-size: 10.5px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--ink-3);
@@ -784,7 +920,7 @@ button {
   --stage: #070707;
   --ink: #efeee9;
   --ink-2: #9c9b96;
-  --ink-3: #5e5d59;
+  --ink-3: #74736e;
   --rule-2: #353535;
   --panel-2: #191919;
   --on-ink: #121212;
@@ -865,7 +1001,7 @@ button {
 
 .canvas-frame .corner {
   position: absolute;
-  font-size: 9.5px;
+  font-size: 10.5px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-3);
@@ -985,7 +1121,7 @@ button {
 }
 
 .track .t-meta {
-  font-size: 10px;
+  font-size: 10.5px;
   color: var(--ink-3);
   margin-top: 4px;
   letter-spacing: 0.04em;
@@ -1011,7 +1147,7 @@ button {
 
 .tabs {
   display: flex;
-  gap: 16px;
+  gap: 14px;
   margin: 16px 0 12px;
   border-bottom: 1px solid var(--rule);
 }
@@ -1081,7 +1217,7 @@ button {
 }
 
 .note code {
-  font-size: 10px;
+  font-size: 10.5px;
   background: var(--panel-2);
   padding: 1px 4px;
   word-break: break-all;
@@ -1162,7 +1298,7 @@ button {
 .axis {
   display: flex;
   justify-content: space-between;
-  font-size: 9px;
+  font-size: 10.5px;
   color: var(--ink-3);
   margin: 4px 0 10px;
 }
@@ -1171,7 +1307,7 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  font-size: 10px;
+  font-size: 10.5px;
   letter-spacing: 0.06em;
   color: var(--ink);
   text-transform: none;
@@ -1327,7 +1463,7 @@ button {
 }
 
 .lane-label .muted {
-  font-size: 10px;
+  font-size: 10.5px;
 }
 
 .lane {
@@ -1356,7 +1492,7 @@ button {
   position: absolute;
   top: -18px;
   transform: translateX(-50%);
-  font-size: 9.5px;
+  font-size: 10.5px;
   background: var(--ink);
   color: var(--on-ink);
   padding: 1px 5px;
@@ -1505,7 +1641,7 @@ button {
   z-index: 60;
   top: 52px;
   right: var(--gut);
-  width: 680px;
+  width: 960px;
   max-width: calc(100vw - 32px);
   background: var(--panel);
   border: 1px solid var(--ink);
@@ -1515,40 +1651,86 @@ button {
 
 .presets .grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 16px 12px;
 }
 
 .preset {
   text-align: left;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
 }
 
 .preset .swatch {
   aspect-ratio: 4 / 5;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
   position: relative;
   overflow: hidden;
   outline: 1px solid var(--rule);
 }
 
-.preset:hover .swatch {
-  outline: 1.5px solid var(--accent);
+.preset .swatch img,
+.preset .swatch video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
-.preset .p-num {
-  font-size: 9.5px;
-  color: var(--accent);
-  font-weight: 600;
+.preset .swatch video {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.preset .swatch.playing video {
+  opacity: 1;
+}
+
+.preset:hover .swatch,
+.preset:focus-visible .swatch {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.preset:focus-visible {
+  outline: none;
+}
+
+.preset.current .swatch {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+.preset .p-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+
+.preset .p-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  background: var(--ink);
+  color: var(--on-ink);
+  font: 600 10px/1 var(--display);
 }
 
 .preset .p-name {
-  font: 600 12px/1.2 var(--display);
+  font: 600 12.5px/1.2 var(--display);
 }
 
 .preset .p-note {
-  font-size: 10px;
+  font-size: 10.5px;
   color: var(--ink-3);
-  line-height: 1.3;
+  line-height: 1.35;
 }
 
 /* ── Palette ─────────────────────────────────────────────────────────── */
@@ -1562,27 +1744,118 @@ button {
 
 .palette .sw {
   position: relative;
+  display: block;
+  width: 100%;
   height: 34px;
   outline: 1px solid var(--rule);
   outline-offset: -1px;
   cursor: pointer;
 }
 
-.palette .sw input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-  width: 100%;
-  height: 100%;
+.palette .sw:hover,
+.palette .sw:focus-visible {
+  outline: 1.5px solid var(--ink);
 }
 
-.palette .sw:hover {
+/* ── Colour picker ───────────────────────────────────────────────────── */
+
+.pop.cp {
+  width: 248px;
+  z-index: 70;
+}
+
+.cp-compare {
+  display: flex;
+  height: 14px;
+  width: 44px;
+  outline: 1px solid var(--rule-2);
+}
+
+.cp-compare > * {
+  flex: 1;
+}
+
+.cp-field {
+  position: relative;
+  height: 150px;
+  cursor: crosshair;
+  touch-action: none;
+  outline: 1px solid var(--rule);
+}
+
+.cp-field:focus-visible,
+.cp-hue:focus-visible {
+  outline: 1.5px solid var(--accent);
+}
+
+.cp-dot {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+.cp-hue {
+  position: relative;
+  height: 12px;
+  margin-top: 10px;
+  cursor: pointer;
+  touch-action: none;
+  background: linear-gradient(90deg, #f00, #ff0 16.7%, #0f0 33.3%, #0ff 50%, #00f 66.7%, #f0f 83.3%, #f00);
+}
+
+.cp-knob {
+  position: absolute;
+  top: -3px;
+  width: 8px;
+  height: 18px;
+  margin-left: -4px;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+.cp-line,
+.cp-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.cp-cap {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  width: 50px;
+  flex: none;
+}
+
+.cp-hex {
+  flex: 1;
+  font-family: var(--mono, ui-monospace, monospace);
+  letter-spacing: 0.04em;
+}
+
+.cp-chip {
+  flex: 1;
+  height: 18px;
+  min-width: 0;
+  outline: 1px solid var(--rule);
+  outline-offset: -1px;
+}
+
+.cp-chip:hover {
   outline: 1.5px solid var(--ink);
 }
 
 .palette .cap {
-  font-size: 9px;
+  font-size: 10.5px;
   color: var(--ink-3);
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1679,7 +1952,7 @@ button {
 
 @media (max-width: 1180px) {
   .app {
-    grid-template-columns: 260px minmax(0, 1fr) 300px;
+    grid-template-columns: var(--left-w, 260px) minmax(0, 1fr) var(--right-w, 300px);
   }
   .brand {
     width: auto;
@@ -1693,6 +1966,9 @@ button {
 }
 
 @media (max-width: 860px) {
+  .resizer {
+    display: none;
+  }
   html,
   body {
     overflow: auto;
@@ -1820,7 +2096,7 @@ button {
 
 .progress-label {
   display: block;
-  font-size: 10px;
+  font-size: 10.5px;
   color: var(--ink-3);
   margin-top: 4px;
 }
@@ -1835,7 +2111,7 @@ button {
 
 .result .r-meta em {
   font-style: normal;
-  font-size: 9px;
+  font-size: 10.5px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   border: 1px solid var(--rule-2);
@@ -1868,6 +2144,80 @@ button {
   overflow-y: auto;
 }
 
-.presets .grid {
-  grid-template-columns: repeat(5, 1fr);
+@media (max-width: 1100px) and (min-width: 861px) {
+  .presets .grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.size-btn {
+  font: 600 12px/1 var(--display);
+  letter-spacing: -0.02em;
+  width: auto;
+  padding: 0 7px;
+}
+
+.pop.size-pop .note {
+  margin-top: 4px;
+}
+
+/* ── Metronome ───────────────────────────────────────────────────────── */
+
+.metro-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.metro-bpm {
+  width: 68px;
+  height: 34px;
+  border: 1px solid var(--rule-2);
+  background: transparent;
+  text-align: center;
+  font: 600 20px/1 var(--display);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.metro-bpm:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.metro-row .btn.icon {
+  width: 26px;
+  height: 34px;
+  font-size: 15px;
+}
+
+.metro-unit {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+}
+
+.metro-tap {
+  height: 34px;
+  padding: 0 14px;
+  gap: 6px;
+}
+
+.metro-tap.flash {
+  animation: tap-flash 0.25s ease-out;
+}
+
+@keyframes tap-flash {
+  from {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+}
+
+.metro-slider {
+  width: 100%;
+  accent-color: var(--accent);
+  margin: 2px 0;
 }

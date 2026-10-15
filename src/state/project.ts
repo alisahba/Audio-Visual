@@ -53,6 +53,8 @@ export interface Project {
   audio: AudioSettings;
   clip: ClipSettings;
   seed: number;
+  /** Sections switched off as a whole; each effect keeps its own on/off. */
+  groupsOff: Record<string, boolean>;
 }
 
 export const ASPECTS: { id: string; w: number; h: number }[] = [
@@ -102,6 +104,7 @@ export function defaultProject(): Project {
     },
     clip: { start: 0, duration: 30, loop: true, snap: true },
     seed: 7,
+    groupsOff: {},
   };
 }
 
@@ -115,6 +118,7 @@ export function normaliseProject(raw: unknown): Project {
     ...src,
     audio: { ...base.audio, ...(src.audio ?? {}), beat: { ...base.audio.beat, ...(src.audio?.beat ?? {}) } },
     clip: { ...base.clip, ...(src.clip ?? {}) },
+    groupsOff: src.groupsOff && typeof src.groupsOff === 'object' ? { ...src.groupsOff } : {},
     fx: base.fx,
     palette: Array.isArray(src.palette) && src.palette.length >= 2 ? src.palette.slice(0, 5) : base.palette,
   };

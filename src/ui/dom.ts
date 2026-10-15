@@ -72,6 +72,9 @@ export const icons = {
   help: I('<circle cx="8" cy="8" r="6.5"/><path d="M6.2 6.2A1.9 1.9 0 1 1 8 8.6V10M8 11.6v.8"/>'),
   save: I('<path d="M2.5 2.5h9l2 2v9h-11z"/><path d="M5 2.5v3.5h5V2.5M5 13.5V9.5h6v4"/>'),
   open: I('<path d="M2 4h4l1.5 1.5H14V13H2z"/><path d="M8 11V7M6 9l2-2 2 2"/>'),
+  dropper: I('<path d="m9.5 4.5 2 2M3 13l1-3 6.2-6.2a1.4 1.4 0 0 1 2 2L6 12z"/>'),
+  power: I('<path d="M8 2v6M4.6 4.2a5 5 0 1 0 6.8 0"/>'),
+  tap: I('<circle cx="8" cy="8" r="2.5"/><circle cx="8" cy="8" r="5.5"/>'),
 };
 
 export type IconName = keyof typeof icons;
@@ -97,9 +100,11 @@ export function clamp(v: number, a: number, b: number): number {
 /** Canvas sized to its CSS box at device pixel ratio. Returns the 2D context. */
 export function fitCanvas(c: HTMLCanvasElement): CanvasRenderingContext2D {
   const r = c.getBoundingClientRect();
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
-  const w = Math.max(1, Math.round(r.width * dpr));
-  const hh = Math.max(1, Math.round(r.height * dpr));
+  // Inside a zoomed panel the on-screen box is larger than the CSS box we draw in.
+  const zoom = c.clientWidth > 0 ? r.width / c.clientWidth : 1;
+  const dpr = Math.min(2, window.devicePixelRatio || 1) * zoom;
+  const w = Math.max(1, Math.round(c.clientWidth * dpr));
+  const hh = Math.max(1, Math.round(c.clientHeight * dpr));
   if (c.width !== w) c.width = w;
   if (c.height !== hh) c.height = hh;
   const ctx = c.getContext('2d')!;

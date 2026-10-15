@@ -250,7 +250,7 @@ export class ExportDialog {
             fps: s.fps,
             bitrate,
             jpegQuality: s.jpeg,
-            includeAudio: s.audio && this.engine.info?.origin !== 'soundcloud',
+            includeAudio: s.audio && this.engine.info?.origin !== 'soundcloud' && !(this.engine.info?.origin === 'metronome' && this.engine.monitor.gain.value < 0.5),
             preroll: s.preroll,
             destination: s.dest,
             stillTime: this.clipTime(),

@@ -18,6 +18,12 @@ export interface TimelineActions {
 const MIN_LEN = 2;
 const MAX_LEN = 600;
 
+/** Pointer x inside an element in its own CSS pixels (correct under interface zoom). */
+function localX(clientX: number, el: HTMLElement): number {
+  const r = el.getBoundingClientRect();
+  return ((clientX - r.left) * el.clientWidth) / Math.max(1, r.width);
+}
+
 export class Timeline {
   readonly el: HTMLElement;
   private song: HTMLCanvasElement;
@@ -128,7 +134,7 @@ export class Timeline {
     clipLane.addEventListener('pointermove', (e) => {
       const t = this.clipTimeAt(e.clientX, clipLane);
       this.clipTip.textContent = fmtTime(t);
-      this.clipTip.style.left = `${e.clientX - clipLane.getBoundingClientRect().left}px`;
+      this.clipTip.style.left = `${localX(e.clientX, clipLane)}px`;
       if (this.drag?.mode === 'scrub') act.seekClip(t);
     });
     clipLane.addEventListener('pointerup', () => (this.drag = null));
@@ -277,7 +283,7 @@ export class Timeline {
   private songMove(e: PointerEvent, el: HTMLElement): void {
     const t = this.timeAt(e.clientX, el);
     this.songTip.textContent = fmtTime(t, 1);
-    this.songTip.style.left = `${e.clientX - el.getBoundingClientRect().left}px`;
+    this.songTip.style.left = `${localX(e.clientX, el)}px`;
     const d = this.drag;
     if (!d) {
       const m = this.hit(e.clientX, el);

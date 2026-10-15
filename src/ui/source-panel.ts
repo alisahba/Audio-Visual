@@ -1,7 +1,9 @@
 import type { AudioEngine, TrackInfo } from '../audio/engine';
+import { METRO_MAX, METRO_MIN, clampBpm, readMetronome, saveMetronome, type MetronomeSettings, type MetroPattern } from '../audio/metronome';
 import * as scApi from '../sources/soundcloud-api';
 import * as soundcloud from '../sources/soundcloud';
 import { store } from '../state/store';
+import { check, segmented } from './controls';
 import { fmtTime, h, icon, toast } from './dom';
 import { Section } from './section';
 
@@ -15,9 +17,13 @@ export interface SourceActions {
   startLive(kind: 'mic' | 'tab'): void;
   stopLive(): void;
   listenHere(): void;
+  /** Make the metronome the source (or update it if it already is). */
+  metronome(s: MetronomeSettings): void;
+  /** Tap tempo; returns the tapped BPM once there are enough taps. */
+  tap(): number | null;
 }
 
-type Tab = 'file' | 'soundcloud' | 'live';
+type Tab = 'file' | 'soundcloud' | 'live' | 'metro';
 
 const ORIGIN_LABEL: Record<string, string> = {
   demo: 'Demo',
@@ -25,6 +31,7 @@ const ORIGIN_LABEL: Record<string, string> = {
   soundcloud: 'SoundCloud',
   mic: 'Microphone',
   tab: 'Shared audio',
+  metronome: 'Metronome',
 };
 
 export class SourcePanel {
@@ -47,6 +54,8 @@ export class SourcePanel {
   private stopBtn: HTMLButtonElement;
   private fileInput: HTMLInputElement;
   private renderSc: () => void = () => {};
+  metro: MetronomeSettings = readMetronome();
+  private syncMetro: () => void = () => {};
 
   constructor(
     private engine: AudioEngine,
@@ -82,7 +91,8 @@ export class SourcePanel {
     const labels: [Tab, string][] = [
       ['file', 'File'],
       ['soundcloud', 'SoundCloud'],
-      ['live', 'Live input'],
+      ['live', 'Live'],
+      ['metro', 'Metronome'],
     ];
     for (const [id, label] of labels) {
       const b = h('button', { type: 'button', role: 'tab', onclick: () => this.showTab(id) }, label) as HTMLButtonElement;
@@ -92,6 +102,7 @@ export class SourcePanel {
     this.bodies.file = this.fileTab();
     this.bodies.soundcloud = this.soundcloudTab();
     this.bodies.live = this.liveTab();
+    this.bodies.metro = this.metroTab();
 
     this.section = new Section('source', '01', 'Source', 'What you are listening to');
     this.section.body.append(
@@ -279,6 +290,110 @@ export class SourcePanel {
         'Play music anywhere — a music app, a YouTube tab — then share it here. In Chrome or Edge on Windows choose “Entire screen” and tick “Share system audio”; for one tab, tick “Share tab audio”.',
       ),
     );
+  }
+
+  private metroTab(): HTMLElement {
+    const m = this.metro;
+    const active = () => this.engine.info?.origin === 'metronome';
+    let timer = 0;
+    const changed = (now = false) => {
+      saveMetronome(m);
+      this.syncMetro();
+      clearTimeout(timer);
+      // Re-render only when the metronome is the live source; debounce slider drags.
+      if (active()) timer = window.setTimeout(() => this.act.metronome({ ...m }), now ? 0 : 350);
+    };
+    const num = h('input', { class: 'metro-bpm', type: 'text', inputmode: 'decimal', 'aria-label': 'Tempo in BPM' }) as HTMLInputElement;
+    num.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') num.blur();
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        m.bpm = clampBpm(m.bpm + (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 10 : 1));
+        changed();
+      }
+    });
+    num.addEventListener('change', () => {
+      const v = parseFloat(num.value);
+      if (isFinite(v)) m.bpm = clampBpm(v);
+      changed(true);
+    });
+    const step = (d: number) => h('button', { type: 'button', class: 'btn icon', title: `${d > 0 ? '+' : '−'}1 BPM (Shift: 10)`, onclick: (e: MouseEvent) => ((m.bpm = clampBpm(m.bpm + d * (e.shiftKey ? 10 : 1))), changed()) }, d > 0 ? '+' : '−');
+    const slider = h('input', { type: 'range', class: 'metro-slider', min: String(METRO_MIN), max: String(METRO_MAX), step: '1', 'aria-label': 'Tempo' }) as HTMLInputElement;
+    slider.addEventListener('input', () => {
+      m.bpm = clampBpm(Number(slider.value));
+      changed();
+    });
+    const tapBtn = h('button', { type: 'button', class: 'btn metro-tap', title: 'Tap along four times or more; the first tap is beat one (key: T)' }, icon('tap'), 'Tap') as HTMLButtonElement;
+    tapBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      this.tapNow();
+    });
+    const pattern = segmented<MetroPattern>({
+      options: [
+        { value: 'groove', label: 'Groove', title: 'Kick on every beat, snare on 2 and 4, hats on the eighths' },
+        { value: 'pulse', label: 'Pulse', title: 'A kick on every beat, accented on the one' },
+        { value: 'click', label: 'Click', title: 'A classic metronome click' },
+      ],
+      value: m.pattern,
+      onChange: (v) => {
+        m.pattern = v;
+        changed(true);
+      },
+    });
+    const hear = check(m.audible, (v) => {
+      m.audible = v;
+      saveMetronome(m);
+      if (active()) this.engine.setMonitor(v);
+    }, 'Hear it');
+    const startBtn = h('button', { type: 'button', class: 'btn primary', onclick: () => this.act.metronome({ ...m }) }, icon('play'), 'Use the metronome') as HTMLButtonElement;
+    const status = h('div', { class: 'note' });
+    this.syncMetro = () => {
+      if (document.activeElement !== num) num.value = String(m.bpm);
+      slider.value = String(Math.round(m.bpm));
+      pattern.set(m.pattern);
+      hear.set(m.audible);
+      startBtn.style.display = active() ? 'none' : '';
+      status.textContent = active() ? `Driving the visuals at ${m.bpm} BPM. Changes apply as you make them.` : 'Not in use. Your settings are kept for next time.';
+    };
+    this.tapFlash = () => {
+      tapBtn.classList.remove('flash');
+      void tapBtn.offsetWidth;
+      tapBtn.classList.add('flash');
+    };
+    this.engine.on('track', () => this.syncMetro());
+    this.syncMetro();
+    return h(
+      'div',
+      { class: 'stack metro' },
+      h('div', { class: 'metro-row' }, step(-1), num, step(1), h('span', { class: 'metro-unit' }, 'BPM'), h('span', { class: 'grow' }), tapBtn),
+      slider,
+      h('div', { class: 'row wide' }, h('div', { class: 'label' }, 'Sound'), pattern.el),
+      h('div', { class: 'hstack' }, hear.el, h('span', { class: 'note' }, 'Untick to follow music playing elsewhere.')),
+      startBtn,
+      status,
+      h('div', { class: 'note' }, 'No track? The metronome drives everything at an exact tempo: beats, bars and the beat window. To match a song you can hear, tap along with T from a bar’s first beat.'),
+    );
+  }
+
+  private tapFlash: () => void = () => {};
+
+  /** Tap tempo (button or T key). */
+  tapNow(): void {
+    // Tapping takes over the source, so it only works where the metronome is in view or in use.
+    if (this.engine.info?.origin !== 'metronome' && this.bodies.metro.style.display === 'none') {
+      this.section.setOpen(true);
+      this.showTab('metro');
+      toast('Metronome: tap T four times along with the music.');
+      return;
+    }
+    this.tapFlash();
+    const bpm = this.act.tap();
+    if (bpm) {
+      this.metro.bpm = bpm;
+      saveMetronome(this.metro);
+      this.syncMetro();
+    }
   }
 
   showEmbed(on: boolean): void {

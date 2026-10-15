@@ -1,3 +1,4 @@
+import { EFFECT_BY_ID } from '../state/defs';
 import { modulated } from '../state/modulate';
 import type { Project } from '../state/project';
 import { aspectRatio } from '../state/project';
@@ -14,6 +15,7 @@ import {
   type Formats,
   type Target,
 } from './gl';
+import { MAX_PARTICLES, Sprites } from './particles';
 import * as S from './shaders';
 
 const SIM_LONG = 192;
@@ -62,6 +64,22 @@ interface Drop {
   life: number;
   col: [number, number, number];
 }
+
+interface Shape {
+  x: number;
+  y: number;
+  r: number;
+  rot: number;
+  spin: number;
+  age: number;
+  life: number;
+  grow: number;
+  kind: number;
+  col: [number, number, number];
+}
+
+const SHAPE_KINDS = ['ring', 'disc', 'square', 'triangle', 'bar', 'cross'];
+const PARTICLE_MODES = ['burst', 'fountain', 'swarm', 'rain', 'ring'];
 
 interface Splat {
   x: number;
@@ -113,6 +131,11 @@ export class Renderer {
   private specTex: WebGLTexture;
 
   private drops: Drop[] = [];
+  private shapes: Shape[] = [];
+  private sprites: Sprites;
+  private partAcc = 0;
+  private scopeGain = 1;
+  private scopeAngle = 0;
   private ripples: { x: number; y: number; age: number }[] = [];
   private sliceSeed = 0;
   private barAge = 10;
@@ -193,6 +216,7 @@ export class Renderer {
     };
     this.waveTex = mkData(WAVE_SIZE);
     this.specTex = mkData(BAND_COUNT);
+    this.sprites = new Sprites(gl, this.formats);
     this.mediaTex = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, this.mediaTex);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -251,6 +275,7 @@ export class Renderer {
       }
       this.dyeW = dyeW;
       this.dyeH = dyeH;
+      this.sprites.resize(dyeW, dyeH);
     }
     if (outChanged) {
       deleteTarget(gl, this.comp);
@@ -306,6 +331,11 @@ export class Renderer {
     this.simTime = 0;
     this.frame = 0;
     this.drops = [];
+    this.shapes = [];
+    this.partAcc = 0;
+    this.scopeGain = 1;
+    this.scopeAngle = 0;
+    this.sprites.reset();
     this.splats = [];
     this.palOff = 0;
     this.palTarget = 0;
@@ -329,7 +359,13 @@ export class Renderer {
   }
 
   private on(fx: string): boolean {
-    return !!this.project?.fx[fx]?.on;
+    const p = this.project;
+    return !!p?.fx[fx]?.on && !p.groupsOff?.[EFFECT_BY_ID[fx]?.group];
+  }
+
+  /** Whether a whole section is live (its master switch). */
+  private groupOn(g: string): boolean {
+    return !this.project?.groupsOff?.[g];
   }
 
   private sel(fx: string, key: string): string {
@@ -349,9 +385,16 @@ export class Renderer {
       const c = hexToRgb(project.palette[i] ?? '#ffffff');
       this.pal.set(c, i * 3);
     }
+    const gl = this.gl;
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.waveTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, WAVE_SIZE, 1, gl.RED, gl.FLOAT, f.samples);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, this.specTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, BAND_COUNT, 1, gl.RED, gl.FLOAT, f.spectrum);
 
     // Colour cycling.
-    const cycle = this.sel('colour', 'cycle');
+    const cycle = this.groupOn('colour') ? this.sel('colour', 'cycle') : 'off';
     if (cycle === 'beat' && f.beatNow) this.palTarget += 1;
     else if (cycle === 'bar' && f.barNow) this.palTarget += 1;
     else if (cycle === 'time') this.palTarget = t * 0.25;
@@ -467,8 +510,137 @@ export class Renderer {
       this.splats.length = 0;
     }
 
+    // Beat shapes.
+    if (this.on('shapes')) {
+      const every = Number(this.sel('shapes', 'every')) || 1;
+      if (f.beatNow && f.beatCount % every === 0) {
+        const kindSel = this.sel('shapes', 'shape');
+        const kind = kindSel === 'mix' ? Math.floor(rnd() * SHAPE_KINDS.length) : Math.max(0, SHAPE_KINDS.indexOf(kindSel));
+        const place = this.sel('shapes', 'place');
+        let x = 0;
+        let y = 0;
+        if (place === 'grid') {
+          x = (Math.floor(rnd() * 3) - 1) * 0.3 * aspect;
+          y = (Math.floor(rnd() * 3) - 1) * 0.3;
+        } else if (place === 'random') {
+          x = (rnd() - 0.5) * aspect * 0.8;
+          y = (rnd() - 0.5) * 0.8;
+        }
+        const ci = cycle === 'off' ? Math.floor(rnd() * 5) : Math.round(this.palTarget) % 5;
+        const spin = this.val('shapes', 'spin');
+        this.shapes.push({
+          x,
+          y,
+          r: this.val('shapes', 'size') * 0.5,
+          rot: kind === 4 ? 0 : (rnd() - 0.5) * Math.abs(spin) * 2.4,
+          spin: spin * 2.5,
+          age: 0,
+          life: this.val('shapes', 'life'),
+          grow: this.val('shapes', 'grow'),
+          kind,
+          col: [this.pal[ci * 3], this.pal[ci * 3 + 1], this.pal[ci * 3 + 2]],
+        });
+        while (this.shapes.length > 8) this.shapes.shift();
+      }
+    }
+    for (const sh of this.shapes) sh.age += dt;
+    this.shapes = this.shapes.filter((sh) => sh.age < sh.life);
+
+    this.sprites.begin();
+    if (this.on('particles')) this.stepParticles(dt, aspect, f, cycle);
+    if (this.on('scope')) this.drawScope(dt, aspect, f);
+
     this.paint(dt, aspect, orbData, orbCount);
     this.frame++;
+  }
+
+  private stepParticles(dt: number, aspect: number, f: Features, cycle: string): void {
+    const rnd = this.rand;
+    const mode = Math.max(0, PARTICLE_MODES.indexOf(this.sel('particles', 'mode')));
+    const amount = this.val('particles', 'amount');
+    const life = this.val('particles', 'life');
+    const spread = this.val('particles', 'spread');
+    // Population the emitter aims for; quadratic so the low end stays usable.
+    const target = 60 + amount * amount * (MAX_PARTICLES - 60);
+    let spawn = 0;
+    let ex = 0;
+    let ey = 0;
+    let colour = this.palOff;
+    if (mode === 0) {
+      if (f.beatNow) {
+        spawn = Math.min(MAX_PARTICLES / 3, target * 0.3 * (0.6 + f.level * 0.6));
+        ex = (rnd() - 0.5) * aspect * 0.8 * spread;
+        ey = (rnd() - 0.5) * 0.8 * spread;
+        colour = cycle === 'off' ? Math.floor(rnd() * 5) : Math.round(this.palTarget);
+      }
+    } else {
+      this.partAcc += (dt * target * (mode === 4 ? 2.2 : 1)) / Math.max(0.2, life);
+      spawn = Math.floor(this.partAcc);
+      this.partAcc -= spawn;
+      if (mode === 1) ex = (rnd() - 0.5) * spread * 0.2 * aspect;
+    }
+    let rx = 0;
+    let ry = 0;
+    if (this.on('drift')) {
+      const ang = (this.val('drift', 'angle') * Math.PI) / 180;
+      const sp = this.val('drift', 'speed') * 0.45;
+      rx = Math.cos(ang) * sp;
+      ry = Math.sin(ang) * sp;
+    }
+    const warp = this.on('warp');
+    const minSide = Math.min(this.dyeW, this.dyeH);
+    this.sprites.particles({
+      dt,
+      time: this.simTime,
+      aspect,
+      mode,
+      spawn,
+      emit: [ex, ey, spread, spread],
+      phys: [this.val('particles', 'speed') * 0.6, this.val('particles', 'chaos'), this.val('particles', 'gravity'), this.val('particles', 'follow')],
+      life,
+      colour,
+      kick: f.beat,
+      size: (this.val('particles', 'size') * minSide) / 1080,
+      opacity: this.val('particles', 'ink'),
+      fluid: this.on('fluid') ? this.vel.read.tex : null,
+      simTexel: [1 / this.simW, 1 / this.simH],
+      spec: this.specTex,
+      flow: this.on('flow') ? [this.val('flow', 'speed'), this.val('flow', 'scale'), this.val('flow', 'evolve'), (this.seed % 97) * 1.37] : [0, 1, 0, 0],
+      ride: [rx, ry, warp ? this.val('warp', 'zoom') : 0, warp ? this.val('warp', 'spin') : 0],
+      pal: this.pal,
+    });
+  }
+
+  private drawScope(dt: number, aspect: number, f: Features): void {
+    // Peak of the low-passed signal the scope draws (same kernel as the shader).
+    const K = [1, 2, 4, 6, 7, 6, 4, 2, 1];
+    const n = f.samples.length;
+    let peak = 0;
+    for (let i = 0; i < n; i += 2) {
+      let v = 0;
+      for (let k = 0; k < 9; k++) v += f.samples[(i + k - 4 + n) % n] * K[k];
+      peak = Math.max(peak, Math.abs(v / 33));
+    }
+    // Auto gain: quick to shrink on loud passages, slow to grow in quiet ones.
+    const want = 1 / Math.max(0.06, peak);
+    this.scopeGain += (want - this.scopeGain) * (want < this.scopeGain ? 0.5 : 1 - Math.exp(-dt / 0.8));
+    this.scopeAngle += dt * this.val('scope', 'spin') * 2;
+    this.sprites.drawScope(
+      {
+        wave: this.waveTex,
+        aspect,
+        scale: this.val('scope', 'scale'),
+        lag: this.val('scope', 'twist'),
+        angle: this.scopeAngle,
+        style: this.sel('scope', 'style') === 'spiral' ? 1 : 0,
+        gain: this.scopeGain,
+        size: (this.val('scope', 'thickness') * Math.min(this.dyeW, this.dyeH)) / 1080,
+        opacity: this.val('scope', 'ink'),
+        palOff: this.palOff,
+        centre: [0, 0],
+      },
+      this.pal,
+    );
   }
 
   private splatScale(): number {
@@ -534,19 +706,10 @@ export class Renderer {
   private paint(dt: number, aspect: number, orbData: Float32Array, orbCount: number): void {
     const gl = this.gl;
     const p = this.project!;
-    const f = this.features!;
     const P = this.progs.paint.use();
-    gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D, this.waveTex);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, WAVE_SIZE, 1, gl.RED, gl.FLOAT, f.samples);
-    gl.activeTexture(gl.TEXTURE3);
-    gl.bindTexture(gl.TEXTURE_2D, this.specTex);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, BAND_COUNT, 1, gl.RED, gl.FLOAT, f.spectrum);
-
+    P.tex('uWave', 2, this.waveTex).tex('uSpec', 3, this.specTex);
     P.tex('uDye', 0, this.dye.read.tex)
       .tex('uVel', 1, this.vel.read.tex)
-      .i('uWave', 2)
-      .i('uSpec', 3)
       .f('uSimTexel', 1 / this.simW, 1 / this.simH)
       .f('uRef', ...this.refTexel(this.dyeW, this.dyeH))
       .f('uAspect', aspect)
@@ -588,7 +751,9 @@ export class Renderer {
 
     const hold = this.val('time', 'hold');
     const fade = this.val('time', 'fade');
-    P.f('uLifeRate', 1 / Math.max(0.05, hold + fade)).f('uBleed', this.val('time', 'bleed'));
+    // With Time switched off, paint never ages: it stays until the canvas is cleared.
+    if (this.groupOn('time')) P.f('uLifeRate', 1 / Math.max(0.05, hold + fade)).f('uBleed', this.val('time', 'bleed'));
+    else P.f('uLifeRate', 0).f('uBleed', 0);
 
     const shape = this.sel('orbs', 'shape');
     P.i('uOrbCount', orbCount)
@@ -615,6 +780,20 @@ export class Renderer {
       dc.set(d.col, i * 3);
     });
     P.i('uDropCount', this.drops.length).v4('uDrops', dd).v3('uDropCol', dc);
+
+    const sa = new Float32Array(32);
+    const sb = new Float32Array(32);
+    const sc = new Float32Array(24);
+    this.shapes.forEach((sh, i) => {
+      const k = Math.min(1, sh.age / sh.life);
+      const ease = 1 - (1 - k) * (1 - k);
+      sa.set([sh.x, sh.y, sh.r * (0.3 + sh.grow * ease + (1 - Math.min(1, sh.grow)) * 0.7), sh.rot + sh.spin * sh.age], i * 4);
+      sb.set([Math.pow(1 - k, 1.4) * Math.min(1, sh.age * 30 + 0.3), this.val('shapes', 'stroke'), sh.kind, 0], i * 4);
+      sc.set(sh.col, i * 3);
+    });
+    P.i('uShapeCount', this.shapes.length).v4('uShapes', sa).v4('uShapeB', sb).v3('uShapeCol', sc);
+    if (this.sprites.used && this.sprites.layer) P.tex('uSprites', 5, this.sprites.layer.tex).f('uSpritesOn', 1);
+    else P.f('uSpritesOn', 0);
 
     P.f(
       'uCloud',
@@ -681,8 +860,9 @@ export class Renderer {
     const intro = project.fx.time.p.intro as number;
     const introK = intro > 0 ? Math.min(1, Math.max(0, clipTime / intro)) : 1;
 
-    const mode = this.sel('colour', 'mode');
-    const blend = this.sel('colour', 'blend');
+    const colourOn = this.groupOn('colour');
+    const mode = colourOn ? this.sel('colour', 'mode') : 'direct';
+    const blend = colourOn ? this.sel('colour', 'blend') : 'normal';
     const C = P.comp.use()
       .tex('uDye', 0, this.dye.read.tex)
       .v3('uPal', this.pal)
@@ -693,10 +873,10 @@ export class Renderer {
       .f('uIntro', introK)
       .i('uMode', mode === 'gradient' ? 1 : mode === 'spectral' ? 2 : 0)
       .i('uBlend', ['normal', 'add', 'multiply', 'screen'].indexOf(blend))
-      .f('uHue', (this.val('colour', 'hue') * Math.PI) / 180)
-      .f('uSat', this.val('colour', 'saturation'))
-      .f('uContrast', this.val('colour', 'contrast'))
-      .f('uExposure', this.val('colour', 'exposure'));
+      .f('uHue', colourOn ? (this.val('colour', 'hue') * Math.PI) / 180 : 0)
+      .f('uSat', colourOn ? this.val('colour', 'saturation') : 1)
+      .f('uContrast', colourOn ? this.val('colour', 'contrast') : 1)
+      .f('uExposure', colourOn ? this.val('colour', 'exposure') : 0);
 
     if (this.on('mirror')) {
       const m = ['h', 'v', 'quad', 'kaleido'].indexOf(this.sel('mirror', 'mode'));
@@ -826,6 +1006,7 @@ export class Renderer {
     this.pressure?.dispose(gl);
     this.dye?.dispose(gl);
     for (const t of [this.divergence, this.curl, this.comp, ...this.blurDown, ...this.blurUp, ...this.bloomDown, ...this.bloomUp]) deleteTarget(gl, t);
+    this.sprites.dispose();
     gl.getExtension('WEBGL_lose_context')?.loseContext();
   }
 }

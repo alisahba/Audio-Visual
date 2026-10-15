@@ -23,9 +23,9 @@ The panels are numbered in signal-flow order:
 
 | | Section | What it does |
 |---|---|---|
-| 01 | **Source** | A local audio file (fully analysed), a SoundCloud track (search or paste a link), or live input (microphone, a browser tab, or the whole system). |
+| 01 | **Source** | A local audio file (fully analysed), a SoundCloud track (search or paste a link), live input (microphone, a browser tab, or the whole system), or a **metronome** at any tempo (see below). |
 | 02 | **Response** | Where beats come from and how strongly the sound pushes the picture. Drag the red window over the live spectrum to choose the frequencies that trigger beats (kick, snare, hats or any custom band), or switch to *Beat track* to lock to the detected tempo (every bar, half, beat, eighth or sixteenth). Set sensitivity, the minimum gap between hits (down to 20 ms), reactivity, low/mid/high gains, attack and release, and an A/V offset. |
-| 03 | **Emit** | What paints colour in: *Orbs*, *Spectrum* (strata, columns, radial, horizon), *Waveform*, *Beat Ink* (each beat drops a new colour that bleeds outward), *Cloud*, and *Media* (your image, video or camera; see below). |
+| 03 | **Emit** | What paints colour in: *Orbs*, *Spectrum* (strata, columns, radial, horizon), *Waveform*, *Beat Ink* (each beat drops a new colour that bleeds outward), *Cloud*, *Particles* (see below), *Shapes* (rings, squares, triangles, bars and crosses stamped on the beat), *Scope* (an oscilloscope figure: the signal plotted against a delayed copy of itself), and *Media* (your image, video or camera; see below). |
 | 04 | **Motion** | How paint moves: a real *Fluid* simulation with buoyancy, a curl-noise *Flow Field* with detail and lean, directional *Drift* with per-column streaks, hardness and wobble, *Zoom / Spin* with twist around any centre, *Melt* (heavy paint drips in uneven columns) and *Ripple* (each beat sends a ring wave through the paint). They all mix into one velocity field. |
 | 05 | **Time** | *Hold* keeps colour at full strength, then it *fades out* over the time you set, so the canvas never gets overloaded. *Bleed* lets colours diffuse into each other. *Fade in* eases the clip in. |
 | 06 | **Colour** | Five-colour palette and ground colour, built-in palettes plus your own (see below), blend mode, direct / gradient-map / spectral mapping, and when a new colour arrives (every beat, every bar, over time). |
@@ -33,18 +33,45 @@ The panels are numbered in signal-flow order:
 
 Each section folds away when you're not using it (click its header; Alt-click to keep only that one open), and shows a one-line summary while folded. The strip at the top of the effects column jumps to any section. Each effect card has a reset button.
 
+Sections 03–07 have a **master switch** on the right of the header. It switches the whole section off at once, and switching it back on restores exactly the effects you had on. Switching off *Time* stops fading (paint stays until you clear the canvas); switching off *Colour* bypasses the mapping and colour cycling.
+
+### Particles
+
+Up to 16,384 particles are simulated on the GPU. What they leave behind becomes paint, so it flows, fades and takes the palette like everything else.
+
+- **Burst on beat**: each beat throws out a ring of sparks in that beat's colour.
+- **Fountain**: a jet rises from the bottom; *Gravity* bends it back down.
+- **Swarm**: a flock that wheels through the canvas and scatters on the beat.
+- **Rain**: falling streaks.
+- **Spectrum ring**: every frequency fires from its own angle on a ring, as hard as it sounds.
+
+*Follow motion* sets how much they ride the Motion section's flow, fluid, drift and zoom. *Chaos* adds turbulence that kicks up on each beat.
+
 Every effect has a **drive** chip. Pick Low, Mid, High, Level or Beat and a depth, and that part of the sound modulates the effect's main parameter. A red tick on the slider shows the live, modulated value. Two drives come from time rather than sound, like a time effector:
 
 - **Time** rises steadily from the start to the end of the clip, so a look can build.
 - **Wave** swings slowly every two bars of the track's tempo.
 
-**Presets** (keys 1–9 and 0) are starting points modelled on the reference images: *Ember, Capsule, Pastel Melt, Thermal, Marble, Paper Bleed, Halo, Pixel Rain, Drip, Liquid Slice, Opal*.
+**Presets** are sixteen starting points, each built differently and wired to react strongly. The panel shows a rendered preview of each one; hover to see it move. Keys 1–9 and 0 load the first ten: *Ember, Supernova, Konstrukt, Marble, Phosphor, Corona, Murmuration, Liquid Slice, Opal, Pastel Melt*. The rest are *Pixel Rain, Paper Bleed, Drip, Thermal, Mandala* and *Capsule*. The previews are rendered with `node scripts/render-previews.cjs`, which needs the dev server, Playwright and ffmpeg.
 
 ### Small things
 
 - **Double-click a slider's label** to set it to 0; double-click the slider itself to reset it to its default.
-- **Custom palettes**: click a swatch to edit a colour, ⇄ reverses the order, the dice shuffles a new palette, and **Save** keeps the current one with the built-ins (right-click a saved palette to delete it).
+- **Your own colours**: click any of the five palette swatches (or *Ground*) to open the colour picker. It has a saturation/brightness field, a hue strip, a hex field, an eyedropper that picks from anywhere on screen (Chrome and Edge), lighter and darker shades, and your recent colours.
+- **Palettes**: ⇄ reverses the order, the dice shuffles a new palette, and **Save** keeps the current one with the built-ins (right-click a saved palette to delete it).
 - **Stage** (above the canvas) sets the space around the canvas to white, grey or black, or follows the light/dark theme.
+- **Wider panels**: drag the inner edge of either side panel to make it wider; double-click the edge to reset it. **Aa** in the top bar sets the interface size (100–145%) for the panels, text and buttons, without changing the canvas.
+
+### Metronome
+
+No track, or music playing somewhere else? The **Metronome** tab in *Source* drives everything at an exact tempo: beats, bars, the beat window and Beat-track mode.
+
+- Set the BPM with the number, the − / + buttons (Shift: ±10) or the slider. Changes apply while it plays.
+- *Groove* plays kick, snare and hats, so the Kick, Snare and Hats beat windows each pick out their own part. *Pulse* is a kick on every beat, and *Click* is a classic metronome.
+- Untick **Hear it** to drive the visuals silently alongside music playing elsewhere.
+- **Tap** (or press **T**) four or more times along with a song to match its tempo; the first tap counts as beat one, so the bars line up too.
+
+The clip is rounded to whole bars so the loop stays in time.
 
 ### Images, video and the camera
 
@@ -136,7 +163,7 @@ It would **not** unlock streaming-service audio such as Spotify's, because those
 
 ## Shortcuts
 
-`Space` play/pause · `R` back to clip start · `C` clear canvas · `← →` seek (Shift: 5 s) · `E` export · `S` snapshot · `F` fullscreen · `1–9`, `0` presets · `Ctrl/Cmd Z` undo (Shift: redo) · Shift-drag a slider for fine control · double-click a slider to reset it, or its label to set it to 0.
+`Space` play/pause · `R` back to clip start · `C` clear canvas · `T` tap tempo · `← →` seek (Shift: 5 s) · `E` export · `S` snapshot · `F` fullscreen · `1–9`, `0` presets · `Ctrl/Cmd Z` undo (Shift: redo) · Shift-drag a slider for fine control · double-click a slider to reset it, or its label to set it to 0.
 
 Projects autosave in the browser. Use the save/open icons to keep `.klangbild.json` project files.
 
@@ -144,11 +171,13 @@ Projects autosave in the browser. Use the save/open icons to keep `.klangbild.js
 
 ```
 src/
-  audio/      DSP (filterbank, SuperFlux), analysis worker (tempo, DP beat tracker), live AudioWorklet, beat picking, engine, demo synth
-  render/     WebGL2 helpers, shaders, renderer (fluid + paint + post), fixed-step simulation driver
+  audio/      DSP (filterbank, SuperFlux), analysis worker (tempo, DP beat tracker), live AudioWorklet, beat picking, engine, demo synth, metronome
+  render/     WebGL2 helpers, shaders, renderer (fluid + paint + post), GPU particles and scope, fixed-step simulation driver
   export/     offline exporter (mediabunny MP4, PNG/JPEG via folder or ZIP) and real-time recorder
   sources/    SoundCloud API (search, resolve, stream decode) and widget player
   media/      image/video/camera input and MediaPipe hand, face and body tracking
   state/      effect definitions, project model, presets, undo store
-  ui/         foldable sections, panels, controls, timeline, export dialog
+  ui/         foldable sections, panels, controls, colour picker, layout, timeline, export dialog
+scripts/      beat-detection evaluation, preset preview renderer
+public/presets/  rendered preset previews (WebP posters, MP4 loops)
 ```

@@ -2,8 +2,9 @@ import { analyseMono, detectBeats, downmix, type TrackAnalysis } from './analysi
 import { FileFeed, LiveFeed, type FeatureSource } from './features';
 import liveWorkletUrl from './live.worklet.ts?worker&url';
 import type { BeatSettings } from '../state/project';
+import { exactGrid } from './metronome';
 
-export type Origin = 'demo' | 'file' | 'soundcloud' | 'mic' | 'tab';
+export type Origin = 'demo' | 'file' | 'soundcloud' | 'mic' | 'tab' | 'metronome';
 
 export interface TrackInfo {
   title: string;
@@ -29,6 +30,8 @@ type Evt = 'state' | 'track' | 'analysis' | 'beats' | 'progress' | 'error';
 export class AudioEngine {
   ctx: AudioContext;
   out: GainNode;
+  /** Per-source level before the master: lets the metronome drive visuals silently. */
+  monitor: GainNode;
   buffer: AudioBuffer | null = null;
   mono: Float32Array | null = null;
   analysis: TrackAnalysis | null = null;
@@ -60,6 +63,8 @@ export class AudioEngine {
     this.ctx = new AudioContext({ latencyHint: 'interactive' });
     this.out = this.ctx.createGain();
     this.out.connect(this.ctx.destination);
+    this.monitor = this.ctx.createGain();
+    this.monitor.connect(this.out);
   }
 
   on(evt: Evt, fn: (arg?: unknown) => void): void {
@@ -141,9 +146,11 @@ export class AudioEngine {
     this.beats = new Float32Array(0);
     this.feed = null;
     this.overview = null;
+    this.monitor.gain.value = 1;
   }
 
-  async loadBuffer(buffer: AudioBuffer, info: TrackInfo, beat: BeatSettings): Promise<void> {
+  /** `exactBpm` replaces the tracked tempo with a perfect grid (metronome). */
+  async loadBuffer(buffer: AudioBuffer, info: TrackInfo, beat: BeatSettings, exactBpm = 0): Promise<void> {
     const token = ++this.loadToken;
     this.teardown();
     this.buffer = buffer;
@@ -160,6 +167,7 @@ export class AudioEngine {
         this.emit('progress', v);
       });
       if (token !== this.loadToken) return;
+      if (exactBpm) exactGrid(an, exactBpm);
       this.analysis = an;
       this.analysing = 0;
       this.beats = detectBeats(an, beat);
@@ -340,7 +348,7 @@ export class AudioEngine {
     this.stopNode();
     const node = this.ctx.createBufferSource();
     node.buffer = this.buffer;
-    node.connect(this.out);
+    node.connect(this.monitor);
     node.start(0, offset);
     node.onended = () => {
       if (this.node === node) {
@@ -386,6 +394,11 @@ export class AudioEngine {
       this.pausedAt = Math.max(0, Math.min(this.duration, t));
       this.emit('state');
     }
+  }
+
+  /** Hear the source or not (the analysis and visuals carry on). */
+  setMonitor(on: boolean): void {
+    this.monitor.gain.setTargetAtTime(on ? 1 : 0, this.ctx.currentTime, 0.01);
   }
 
   setVolume(v: number): void {

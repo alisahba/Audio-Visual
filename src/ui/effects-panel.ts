@@ -4,6 +4,7 @@ import { modulated } from '../state/modulate';
 import { PALETTES } from '../state/presets';
 import { defaultEffects } from '../state/project';
 import { store } from '../state/store';
+import { openColorPicker } from './color-picker';
 import { check, rangeRow, segmented, selectRow, type RangeRow } from './controls';
 import { h, icon, toast } from './dom';
 import { randomPalette } from './palette';
@@ -23,6 +24,14 @@ interface SavedPalette {
 
 const MY_PALETTES = 'klangbild.palettes.v1';
 
+const SWITCH_HINT: Record<string, string> = {
+  emit: 'Switch all emitters off at once; switching back restores the ones you had on',
+  motion: 'Freeze all motion at once; switching back restores the ones you had on',
+  time: 'Switch fading off: paint stays until you clear the canvas (C)',
+  colour: 'Bypass mapping and colour cycling: the palette as it is',
+  post: 'Switch every post effect off at once; switching back restores the ones you had on',
+};
+
 function readMine(): SavedPalette[] {
   try {
     return JSON.parse(localStorage.getItem(MY_PALETTES) ?? '[]');
@@ -37,6 +46,7 @@ export class EffectsPanel {
   private selects = new Map<string, (v: string) => void>();
   private cards = new Map<string, CardRefs>();
   private sections = new Map<string, Section>();
+  private navButtons = new Map<string, HTMLElement>();
   private swatches: HTMLElement[] = [];
   private bgSwatch!: HTMLElement;
   private paletteList!: HTMLElement;
@@ -49,11 +59,22 @@ export class EffectsPanel {
     const nav = h(
       'nav',
       { class: 'sec-nav', 'aria-label': 'Sections' },
-      GROUPS.map((g) => h('button', { type: 'button', title: g.hint, onclick: () => Section.reveal(g.id) }, h('b', null, g.num), ` ${g.label}`)),
+      GROUPS.map((g) => {
+        const b = h('button', { type: 'button', title: g.hint, onclick: () => Section.reveal(g.id) }, h('b', null, g.num), ` ${g.label}`);
+        this.navButtons.set(g.id, b);
+        return b;
+      }),
     );
     this.el = h('aside', { class: 'panel right', 'aria-label': 'Effects' }, nav);
     for (const g of GROUPS) {
-      const sec = new Section(g.id, g.num, g.label, g.hint);
+      const sec = new Section(g.id, g.num, g.label, g.hint, {
+        switchHint: SWITCH_HINT[g.id],
+        onSwitch: (on) =>
+          store.update('fx', (p) => {
+            if (on) delete p.groupsOff[g.id];
+            else p.groupsOff[g.id] = true;
+          }),
+      });
       this.sections.set(g.id, sec);
       if (g.id === 'colour') sec.body.appendChild(this.paletteBlock());
       for (const e of EFFECTS.filter((x) => x.group === g.id)) sec.body.appendChild(this.card(e));
@@ -209,22 +230,26 @@ export class EffectsPanel {
     head.appendChild(actions);
     const pal = h('div', { class: 'palette' });
     for (let i = 0; i < 5; i++) {
-      const input = h('input', {
-        type: 'color',
-        'aria-label': `Colour ${i + 1}`,
-        oninput: () => store.update('palette', (p) => (p.palette[i] = input.value)),
+      const name = `Colour ${String(i + 1).padStart(2, '0')}`;
+      const sw: HTMLButtonElement = h('button', {
+        type: 'button',
+        class: 'sw',
+        title: `${name}: click to make your own colour`,
+        'aria-label': name,
+        onclick: () => openColorPicker(sw, name, store.p.palette[i], (c) => store.update('palette', (p) => (p.palette[i] = c))),
       });
-      const sw = h('label', { class: 'sw', title: 'Click to pick a colour' }, input);
       this.swatches.push(sw);
       pal.appendChild(h('div', null, sw, h('div', { class: 'cap' }, String(i + 1).padStart(2, '0'))));
     }
     pal.appendChild(h('div'));
-    const bgIn = h('input', {
-      type: 'color',
-      'aria-label': 'Background',
-      oninput: () => store.update('palette', (p) => (p.background = bgIn.value)),
+    const bg: HTMLButtonElement = h('button', {
+      type: 'button',
+      class: 'sw',
+      title: 'Ground: the canvas colour under the paint',
+      'aria-label': 'Ground colour',
+      onclick: () => openColorPicker(bg, 'Ground', store.p.background, (c) => store.update('palette', (p) => (p.background = c))),
     });
-    this.bgSwatch = h('label', { class: 'sw', title: 'Canvas ground colour' }, bgIn);
+    this.bgSwatch = bg;
     pal.appendChild(h('div', null, this.bgSwatch, h('div', { class: 'cap' }, 'Ground')));
     this.paletteList = h('div', { class: 'palette-list' });
     this.renderPaletteList();
@@ -307,15 +332,15 @@ export class EffectsPanel {
       let summary = names.length ? names.join(' · ') : 'All off';
       if (g.id === 'time') summary = `Hold ${(p.fx.time.p.hold as number).toFixed(1)} s · Fade ${(p.fx.time.p.fade as number).toFixed(1)} s`;
       if (g.id === 'colour') summary = String(p.fx.colour.p.mode) === 'direct' ? 'Direct' : String(p.fx.colour.p.mode) === 'gradient' ? 'Gradient map' : 'Spectral';
-      this.sections.get(g.id)!.setSummary(summary);
+      const off = !!p.groupsOff[g.id];
+      if (off) summary = g.id === 'time' ? 'Off · paint stays' : g.id === 'colour' ? 'Off · raw palette' : 'Off';
+      const sec = this.sections.get(g.id)!;
+      sec.setSummary(summary);
+      sec.setSwitch(!off);
+      this.navButtons.get(g.id)?.classList.toggle('off', off);
     }
-    for (let i = 0; i < 5; i++) {
-      const c = p.palette[i];
-      this.swatches[i].style.background = c;
-      (this.swatches[i].querySelector('input') as HTMLInputElement).value = c;
-    }
+    for (let i = 0; i < 5; i++) this.swatches[i].style.background = p.palette[i];
     this.bgSwatch.style.background = p.background;
-    (this.bgSwatch.querySelector('input') as HTMLInputElement).value = p.background;
     // Colour summary shows the palette itself.
     const colSec = this.sections.get('colour')!;
     colSec.el.style.setProperty('--sw', `linear-gradient(90deg, ${p.palette.join(',')})`);

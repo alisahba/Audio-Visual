@@ -79,7 +79,11 @@ class LiveAnalyser extends AudioWorkletProcessor {
     const wave = new Float32Array(WAVE);
     const span = Math.max(1, Math.floor(n / 2 / WAVE));
     const off = n - WAVE * span;
-    for (let i = 0; i < WAVE; i++) wave[i] = this.ring[(this.write + off + i * span) % n];
+    for (let i = 0; i < WAVE; i++) {
+      let v = 0;
+      for (let k = 0; k < span; k++) v += this.ring[(this.write + off + i * span + k) % n];
+      wave[i] = v / span;
+    }
     const levelDb = 10 * Math.log10(sq / this.hop + 1e-12);
     this.port.postMessage({ type: 'frame', bands, fine, wave, levelDb }, [bands.buffer, fine.buffer, wave.buffer]);
   }

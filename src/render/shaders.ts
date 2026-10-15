@@ -89,7 +89,7 @@ vec2 curlNoise(vec2 p, float t) {
 }
 `;
 
-const PALETTE = `
+export const PALETTE = `
 uniform vec3 uPal[5];
 vec3 palAt(float x) {
   x = mod(x, 5.0);
@@ -286,6 +286,35 @@ uniform vec4 uDrops[12];
 uniform vec3 uDropCol[12];
 
 uniform vec4 uCloud;
+
+uniform int uShapeCount;
+uniform vec4 uShapes[8];   // x, y, radius, rotation
+uniform vec4 uShapeB[8];   // alpha, stroke, kind
+uniform vec3 uShapeCol[8];
+
+uniform sampler2D uSprites;
+uniform float uSpritesOn;
+
+float sdBox(vec2 q, vec2 b) {
+  vec2 d = abs(q) - b;
+  return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
+}
+float sdTri(vec2 q, float r) {
+  const float k = 1.7320508;
+  q.x = abs(q.x) - r;
+  q.y = q.y + r / k;
+  if (q.x + k * q.y > 0.0) q = vec2(q.x - k * q.y, -k * q.x - q.y) / 2.0;
+  q.x -= clamp(q.x, -2.0 * r, 0.0);
+  return -length(q) * sign(q.y);
+}
+float sdShape(vec2 q, int kind, float r, float w) {
+  if (kind == 0) return abs(length(q) - r) - w;
+  if (kind == 1) return length(q) - r;
+  if (kind == 2) return abs(sdBox(q, vec2(r * 0.86))) - w;
+  if (kind == 3) return abs(sdTri(q, r)) - w;
+  if (kind == 4) return sdBox(q, vec2(r * 2.4, w * 1.5 + r * 0.05));
+  return min(sdBox(q, vec2(r, w * 1.6)), sdBox(q, vec2(w * 1.6, r)));
+}
 
 void over(inout vec4 acc, vec3 c, float a) {
   a = clamp(a, 0.0, 1.0);
@@ -516,6 +545,26 @@ void main() {
     float dist = length(d) * (1.0 + n * 0.25);
     float a = 1.0 - smoothstep(dr.z * 0.25, dr.z, dist);
     over(acc, uDropCol[i], rate(a * dr.w * 0.4));
+  }
+
+  // Beat shapes
+  for (int i = 0; i < 8; i++) {
+    if (i >= uShapeCount) break;
+    vec4 sh = uShapes[i];
+    vec4 sb = uShapeB[i];
+    vec2 q = p - sh.xy;
+    float c = cos(sh.w);
+    float sn = sin(sh.w);
+    q = mat2(c, -sn, sn, c) * q;
+    float d = sdShape(q, int(sb.z + 0.5), sh.z, sb.y);
+    float a = 1.0 - smoothstep(-uRef.y, uRef.y * 1.5, d);
+    over(acc, uShapeCol[i], a * sb.x);
+  }
+
+  // Particles and scope, drawn as sprites this step.
+  if (uSpritesOn > 0.5) {
+    vec4 sp = texture(uSprites, uv);
+    acc = sp + acc * (1.0 - sp.a);
   }
 
   o = acc + prev * (1.0 - acc.a);

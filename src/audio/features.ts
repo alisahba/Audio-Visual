@@ -123,9 +123,15 @@ export class FileFeed implements FeatureSource {
     const centre = Math.floor(t * this.sampleRate);
     const span = 4;
     const start = centre - (WAVE_SIZE * span) / 2;
+    // Average each span rather than picking one sample, so highs don't alias into hiss.
     for (let i = 0; i < WAVE_SIZE; i++) {
       const idx = start + i * span;
-      raw.wave[i] = idx >= 0 && idx < this.mono.length ? this.mono[idx] : 0;
+      let v = 0;
+      for (let k = 0; k < span; k++) {
+        const j = idx + k;
+        if (j >= 0 && j < this.mono.length) v += this.mono[j];
+      }
+      raw.wave[i] = v / span;
     }
     if (t1 <= t0) return 0;
     return Math.max(0, beatIndexAfter(this.beats, t1) - beatIndexAfter(this.beats, t0));
@@ -225,7 +231,11 @@ export class LiveFeed implements FeatureSource {
       const wave = new Float32Array(WAVE_SIZE);
       const span = Math.floor(t.length / WAVE_SIZE / 2);
       const off = t.length / 2 - (WAVE_SIZE * span) / 2;
-      for (let i = 0; i < WAVE_SIZE; i++) wave[i] = t[off + i * span];
+      for (let i = 0; i < WAVE_SIZE; i++) {
+        let v = 0;
+        for (let k = 0; k < span; k++) v += t[off + i * span + k];
+        wave[i] = v / Math.max(1, span);
+      }
       this.ingest({ bands, fine, wave, levelDb: 10 * Math.log10(sq / t.length + 1e-12) });
       return;
     }
