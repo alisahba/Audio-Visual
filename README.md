@@ -13,7 +13,7 @@ npm install
 npm run dev        # http://127.0.0.1:5173
 ```
 
-`npm run build` writes a static site to `dist/` that can be hosted anywhere (it uses relative paths). A GitHub Pages workflow is included in `.github/workflows/pages.yml`: in the repository settings set **Pages → Source → GitHub Actions**, and every push to `main` publishes the app.
+`npm run build` writes a static site to `dist/` that can be hosted anywhere (it uses relative paths). Live at **https://alisahba.github.io/Audio-Visual/**. Every push to `main` rebuilds the `gh-pages` branch (`.github/workflows/pages.yml`), which GitHub Pages serves.
 
 Use **Chrome or Edge** for the full feature set (H.264 MP4 export, writing image sequences straight into a folder, sharing tab/system audio). Firefox and Safari run the instrument; their export and capture options are narrower (see *Browser support*).
 
