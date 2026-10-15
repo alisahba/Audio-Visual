@@ -343,6 +343,7 @@ export function applyPreset(project: Project, preset: Preset): void {
   project.palette = preset.palette.slice();
   project.background = preset.background;
   project.name = preset.name;
+  project.preset = preset.id;
 }
 
 export const PALETTES: { name: string; colors: string[]; bg: string }[] = PRESETS.map((p) => ({

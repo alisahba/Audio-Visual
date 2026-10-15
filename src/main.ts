@@ -9,7 +9,7 @@ import { SimDriver } from './render/sim';
 import { MediaManager } from './media/media';
 import * as scApi from './sources/soundcloud-api';
 import * as soundcloud from './sources/soundcloud';
-import { ASPECTS, aspectRatio } from './state/project';
+import { ASPECTS, aspectRatio, defaultProject } from './state/project';
 import { PRESETS, applyPreset } from './state/presets';
 import { store } from './state/store';
 import { segmented } from './ui/controls';
@@ -210,6 +210,7 @@ const top = h(
     { class: 'top-actions' },
     h('button', { type: 'button', class: 'btn icon ghost', title: 'Undo (Ctrl+Z)', 'aria-label': 'Undo', onclick: () => store.undo() }, icon('undo')),
     h('button', { type: 'button', class: 'btn icon ghost', title: 'Redo (Ctrl+Shift+Z)', 'aria-label': 'Redo', onclick: () => store.redo() }, icon('redo')),
+    h('button', { type: 'button', class: 'btn ghost reset-btn', title: 'Reset settings to the preset or the defaults', onclick: (e: Event) => openResetPop(e.currentTarget as HTMLElement) }, 'Reset'),
     h('button', { type: 'button', class: 'btn icon ghost', title: 'Open project (.json)', 'aria-label': 'Open project', onclick: () => fileInput.click() }, icon('open')),
     h('button', { type: 'button', class: 'btn icon ghost', title: 'Save project (.json)', 'aria-label': 'Save project', onclick: () => saveProject() }, icon('save')),
     h('button', { type: 'button', class: 'btn icon ghost', title: 'Keyboard shortcuts (?)', 'aria-label': 'Help', onclick: () => toggleHelp() }, icon('help')),
@@ -223,6 +224,54 @@ const top = h(
 
 app.append(top, left, stage, effects.el, timeline.el);
 const layout = installLayout(app, left, effects.el, () => timeline.refresh());
+
+/** Reset everything: back to the loaded preset as it shipped, or to factory defaults. Undoable. */
+function openResetPop(anchor: HTMLElement): void {
+  document.querySelector('.pop.reset-pop')?.remove();
+  const preset = PRESETS.find((p) => p.id === store.p.preset);
+  const close = () => {
+    pop.remove();
+    document.removeEventListener('pointerdown', outside, true);
+  };
+  const keepClip = (fn: (p: typeof store.p) => void) =>
+    store.update('all', (p) => {
+      const clip = { ...p.clip };
+      const aspect = p.aspect;
+      fn(p);
+      p.clip = clip;
+      p.aspect = aspect;
+    });
+  const item = (title: string, note: string, run: () => void) =>
+    h('button', { type: 'button', class: 'reset-item', onclick: () => { run(); close(); resetSim(engine.time); toast(`${title}. Ctrl+Z undoes it.`); } }, h('b', null, title), h('span', null, note));
+  const pop = h(
+    'div',
+    { class: 'pop reset-pop', role: 'dialog', 'aria-label': 'Reset' },
+    h('div', { class: 'pop-title' }, h('span', null, 'Reset')),
+    preset
+      ? item(`Back to ${preset.name}`, 'Every effect, colour and response setting as the preset ships.', () => keepClip((p) => applyPreset(p, preset)))
+      : null,
+    item('Everything to defaults', 'All effects, palette and response settings to their factory values. Your track and clip stay.', () =>
+      keepClip((p) => {
+        const d = defaultProject();
+        p.fx = d.fx;
+        p.palette = d.palette;
+        p.background = d.background;
+        p.audio = d.audio;
+        p.groupsOff = {};
+        p.preset = undefined;
+        p.name = 'Untitled';
+      }),
+    ),
+  );
+  document.body.appendChild(pop);
+  const r = anchor.getBoundingClientRect();
+  pop.style.top = `${r.bottom + 6}px`;
+  pop.style.left = `${Math.max(8, Math.min(window.innerWidth - pop.offsetWidth - 8, r.left))}px`;
+  const outside = (e: PointerEvent) => {
+    if (!pop.contains(e.target as Node) && !anchor.contains(e.target as Node)) close();
+  };
+  setTimeout(() => document.addEventListener('pointerdown', outside, true), 0);
+}
 
 function openSizePop(anchor: HTMLElement): void {
   document.querySelector('.pop.size-pop')?.remove();
@@ -309,10 +358,9 @@ function toggleHelp(): void {
     ['S', 'Snapshot PNG'],
     ['F', 'Fullscreen'],
     ['1 – 9, 0', 'Presets'],
-    ['Double-click label', 'Set to zero'],
     ['Ctrl Z', 'Undo (Shift: redo)'],
     ['Shift-drag', 'Fine slider control'],
-    ['Double-click', 'Reset slider'],
+    ['Double-click', 'Reset a slider or its label to default'],
     ['Alt-drag', 'Move clip without snapping'],
   ];
   helpEl = h(

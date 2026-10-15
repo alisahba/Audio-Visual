@@ -46,6 +46,8 @@ export interface ClipSettings {
 export interface Project {
   v: 1;
   name: string;
+  /** Id of the preset this project started from, for "reset to preset". */
+  preset?: string;
   aspect: string;
   palette: string[];
   background: string;

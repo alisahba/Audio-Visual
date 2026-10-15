@@ -56,7 +56,8 @@ Every effect has a **drive** chip. Pick Low, Mid, High, Level or Beat and a dept
 
 ### Small things
 
-- **Double-click a slider's label** to set it to 0; double-click the slider itself to reset it to its default.
+- **Double-click a setting's label** (or its slider) to put it back to its default value.
+- **Reset** (top bar) takes everything back to the preset you loaded, or to the factory defaults.
 - **Your own colours**: click any of the five palette swatches (or *Ground*) to open the colour picker. It has a saturation/brightness field, a hue strip, a hex field, an eyedropper that picks from anywhere on screen (Chrome and Edge), lighter and darker shades, and your recent colours.
 - **Palettes**: ⇄ reverses the order, the dice shuffles a new palette, and **Save** keeps the current one with the built-ins (right-click a saved palette to delete it).
 - **Stage** (above the canvas) sets the space around the canvas to white, grey or black, or follows the light/dark theme.
@@ -163,7 +164,7 @@ It would **not** unlock streaming-service audio such as Spotify's, because those
 
 ## Shortcuts
 
-`Space` play/pause · `R` back to clip start · `C` clear canvas · `T` tap tempo · `← →` seek (Shift: 5 s) · `E` export · `S` snapshot · `F` fullscreen · `1–9`, `0` presets · `Ctrl/Cmd Z` undo (Shift: redo) · Shift-drag a slider for fine control · double-click a slider to reset it, or its label to set it to 0.
+`Space` play/pause · `R` back to clip start · `C` clear canvas · `T` tap tempo · `← →` seek (Shift: 5 s) · `E` export · `S` snapshot · `F` fullscreen · `1–9`, `0` presets · `Ctrl/Cmd Z` undo (Shift: redo) · Shift-drag a slider for fine control · double-click a slider or its label to reset it to default.
 
 Projects autosave in the browser. Use the save/open icons to keep `.klangbild.json` project files.
 

@@ -158,15 +158,14 @@ export function rangeRow(o: RangeOpts): RangeRow {
   });
 
   render();
-  const zeroV = Math.min(o.max, Math.max(o.min, 0));
   const label = h(
     'div',
-    { class: 'label', title: `${o.hint ? `${o.hint}\n` : ''}Double-click: set to ${fmt(zeroV)} · on the slider: reset to ${fmt(o.def)}` },
+    { class: 'label', title: `${o.hint ? `${o.hint}\n` : ''}Double-click to reset to ${fmt(o.def)}` },
     o.label,
   );
   label.addEventListener('dblclick', (e) => {
     e.preventDefault();
-    commit(zeroV);
+    commit(o.def);
   });
   const row = h('div', { class: 'row' }, label, slider, input);
   return {
