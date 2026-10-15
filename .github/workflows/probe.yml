@@ -1,0 +1,30 @@
+name: Probe (temporary)
+
+on:
+  push:
+    branches: [claude/friendly-curie-vzsie8]
+    paths: ['.github/workflows/probe.yml', 'scripts/probe/**']
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: CORS headers
+        run: |
+          O="Origin: https://alisahba.github.io"
+          echo "== widget api.js"; curl -sI https://w.soundcloud.com/player/api.js | head -5
+          echo "== oembed"; curl -s -D- -o /dev/null -H "$O" "https://soundcloud.com/oembed?format=json&url=https://soundcloud.com/forss/flickermood" | grep -i -E "^HTTP|access-control"
+          echo "== token preflight"; curl -s -D- -o /dev/null -X OPTIONS -H "$O" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: authorization,content-type" https://secure.soundcloud.com/oauth/token | grep -i -E "^HTTP|access-control"
+          echo "== api preflight"; curl -s -D- -o /dev/null -X OPTIONS -H "$O" -H "Access-Control-Request-Method: GET" -H "Access-Control-Request-Headers: authorization" "https://api.soundcloud.com/resolve?url=https://soundcloud.com/forss/flickermood" | grep -i -E "^HTTP|access-control"
+          echo "== api get"; curl -s -D- -o /dev/null -H "$O" "https://api.soundcloud.com/resolve?url=https://soundcloud.com/forss/flickermood" | grep -i -E "^HTTP|access-control"
+          echo "== wave"; curl -s -D- -o /dev/null -H "$O" "https://wave.sndcdn.com/PP3Eb34ToNki_m.json" | grep -i -E "^HTTP|access-control"
+      - name: Browser flow
+        run: |
+          npm i --no-save playwright@1.56.1
+          node scripts/probe/sc-probe.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe
+          path: probe.png
