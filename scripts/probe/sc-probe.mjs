@@ -10,8 +10,11 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const log = (...a) => console.log('[probe]', ...a);
-page.on('console', (m) => log(`console.${m.type()}:`, m.text().slice(0, 300)));
-page.on('pageerror', (e) => log('pageerror:', e.message));
+const seenC = new Set();
+page.on('console', (m) => { const t = m.text().slice(0, 300); if (seenC.has(t)) return; seenC.add(t); log(`console.${m.type()}:`, t); });
+page.on('framenavigated', (f) => log('frame:', f.url().slice(0, 140)));
+const seen = new Set();
+page.on('pageerror', (e) => { if (seen.has(e.message)) return; seen.add(e.message); log('pageerror:', e.message, '\n', e.stack); });
 page.on('requestfailed', (r) => log('requestfailed:', r.url().slice(0, 120), r.failure()?.errorText));
 await page.goto(URL, { waitUntil: 'networkidle' });
 await page.waitForFunction(() => window.klangbild, null, { timeout: 30000 });
@@ -20,6 +23,8 @@ await page.fill('input[aria-label="SoundCloud track link"]', TRACK);
 await page.locator('button:visible', { hasText: /^Load$/ }).click();
 await page.waitForTimeout(12000);
 log('after load', JSON.stringify(await page.evaluate(() => ({ kind: window.klangbild.engine.kind, info: window.klangbild.engine.info, overview: !!window.klangbild.engine.overview, toasts: [...document.querySelectorAll('.toast')].map((t) => t.textContent) }))));
+// Watch raw widget messages arriving in the page.
+await page.evaluate(() => { window.__scmsgs = []; window.addEventListener('message', (e) => { if (window.__scmsgs.length < 15) window.__scmsgs.push(String(e.origin) + ' ' + (typeof e.data === 'string' ? e.data : JSON.stringify(e.data)).slice(0, 200)); }); });
 await page.keyboard.press('Space');
 await page.waitForTimeout(10000);
 log('after play', JSON.stringify(await page.evaluate(() => {
@@ -32,7 +37,9 @@ log('after play', JSON.stringify(await page.evaluate(() => {
     out.rms = Math.sqrt(td.reduce((s, v) => s + v * v, 0) / td.length);
   }
   out.level = k.sim.features.level;
+  out.msgs = window.__scmsgs;
   return out;
 })));
 await page.screenshot({ path: 'probe.png' });
 await browser.close();
+# rerun 1792073240
