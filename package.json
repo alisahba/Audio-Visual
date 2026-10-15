@@ -1,0 +1,21 @@
+{
+  "name": "klangbild",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Audio-reactive abstract visual instrument for the web.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3",
+    "mediabunny": "^1.61.4"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.2",
+    "vite": "^8.3.4"
+  }
+}
