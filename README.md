@@ -31,7 +31,10 @@ The panels are numbered in signal-flow order:
 | 06 | **Colour** | Five-colour palette and ground colour (or take colours from the track artwork), blend mode, direct / gradient-map / spectral mapping, and when a new colour arrives (every beat, every bar, over time). |
 | 07 | **Post** | Mirror and kaleidoscope, pixel stretch, glitch, RGB split, soft focus, glow, contour lines, dither/halftone, film grain, vignette. |
 
-Every effect has an **audio drive** chip: choose Low, Mid, High, Level or Beat and a depth, and that part of the sound modulates the effect's main parameter. A red tick on the slider shows the live, modulated value.
+Every effect has a **drive** chip. Pick Low, Mid, High, Level or Beat and a depth, and that part of the sound modulates the effect's main parameter. A red tick on the slider shows the live, modulated value. Two drives come from time rather than sound, like a time effector:
+
+- **Time** rises steadily from the start to the end of the clip, so a look can build.
+- **Wave** swings slowly every two bars of the track's tempo.
 
 **Presets** (keys 1–8) are starting points modelled on the reference images: *Ember, Capsule, Pastel Melt, Thermal, Marble, Paper Bleed, Halo, Pixel Rain*.
 

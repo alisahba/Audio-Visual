@@ -81,7 +81,7 @@ export function icon(name: IconName): SVGSVGElement {
 }
 
 export function fmtTime(t: number, dp = 2): string {
-  if (!isFinite(t)) t = 0;
+  if (!isFinite(t) || Math.abs(t) < 0.005) t = 0;
   const neg = t < 0;
   t = Math.abs(t);
   const m = Math.floor(t / 60);

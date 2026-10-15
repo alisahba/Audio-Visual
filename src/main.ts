@@ -429,6 +429,7 @@ async function pickSpotify(t: spotify.SpotifyTrack): Promise<void> {
     afterLoad();
     if (t.art) applyArtworkPalette(t.art, true);
   } catch (err) {
+    source.showEmbed(!!engine.external);
     toast(String((err as Error).message ?? err), 'error');
   }
 }
@@ -445,6 +446,7 @@ async function loadSoundCloud(link: string): Promise<void> {
     engine.attachExternal(transport, { title: 'SoundCloud', artist: 'Loading…', duration: 0, origin: 'soundcloud', link });
     afterLoad();
   } catch (err) {
+    source.showEmbed(!!engine.external);
     toast(String((err as Error).message ?? err), 'error');
   }
 }
@@ -665,7 +667,8 @@ function loop(now: number): void {
         resetSim(t);
       }
     }
-    if (Math.abs(t - sim.songTime) > 0.3) resetSim(t);
+    // Jumps (seek, loop) start a fresh canvas; merely falling behind drops time instead.
+    if (t < sim.songTime - 0.1 || t - sim.songTime > 1.5) resetSim(t);
     sim.advanceTo(t, engine.feed, p, 4);
     needsRender = true;
   }
