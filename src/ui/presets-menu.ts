@@ -1,6 +1,6 @@
 import { PRESETS, applyPreset, type Preset } from '../state/presets';
 import { store } from '../state/store';
-import { h } from './dom';
+import { h, icon } from './dom';
 
 const BASE = `${import.meta.env.BASE_URL}presets/`;
 
@@ -19,6 +19,7 @@ export class PresetsMenu {
   constructor(
     private anchor: HTMLElement,
     private onApply: () => void,
+    private onSurprise?: () => void,
   ) {}
 
   toggle(): void {
@@ -75,7 +76,10 @@ export class PresetsMenu {
         'div',
         { class: 'presets-head' },
         h('span', { class: 'title' }, 'Presets'),
-        h('span', { class: 'hint' }, 'Hover to preview, click to load. Every control stays editable. Keys 1–9 and 0 load the first ten.'),
+        h('span', { class: 'hint' }, 'Hover to preview, click to load. Keys 1–9 and 0 load the first ten.'),
+        this.onSurprise
+          ? h('button', { type: 'button', class: 'btn small', title: 'A new look built from a random preset (G)', onclick: () => (this.close(), this.onSurprise?.()) }, icon('dice'), 'Surprise me')
+          : null,
       ),
       grid,
     );

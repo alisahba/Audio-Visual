@@ -481,7 +481,7 @@ body.resizing .panel {
 /* Keep revealed sections and cards clear of the sticky nav. */
 .panel.right .sec,
 .panel.right .card {
-  scroll-margin-top: 48px;
+  scroll-margin-top: 84px;
 }
 
 .sec-nav button {
@@ -634,25 +634,23 @@ body.resizing .panel {
 
 .seg {
   display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  background: var(--rule-2);
   border: 1px solid var(--rule-2);
   min-width: 0;
 }
 
+/* Buttons grow to fill each row; long option sets wrap instead of truncating. */
 .seg button {
   flex: 1 1 auto;
   height: 22px;
   font-size: 10.5px;
   letter-spacing: -0.01em;
-  padding: 0 5px;
-  min-width: 0;
+  padding: 0 6px;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   color: var(--ink-2);
-}
-
-.seg button + button {
-  border-left: 1px solid var(--rule-2);
+  background: var(--panel);
 }
 
 .seg button:hover {
@@ -949,6 +947,15 @@ body.resizing .panel {
   padding: 0 9px;
   flex: none;
   overflow: visible;
+  background: var(--stage);
+}
+
+.stage-bar .seg button:hover {
+  background: var(--panel-2);
+}
+
+.stage-bar .seg button.on {
+  background: var(--ink);
 }
 
 .stage-bar .meta {
@@ -1918,8 +1925,35 @@ body.resizing .panel {
   animation: toast-in 0.2s ease-out;
 }
 
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  transition: opacity 0.18s, transform 0.18s;
+}
+
+.toast.out {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+.toast-act {
+  font-weight: 600;
+  color: var(--accent);
+  padding: 2px 0;
+  white-space: nowrap;
+}
+
+.toast-act:hover {
+  text-decoration: underline;
+}
+
 .toast.error {
   background: var(--accent);
+  color: #fff;
+}
+
+.toast.error .toast-act {
   color: #fff;
 }
 
@@ -2250,4 +2284,280 @@ body.resizing .panel {
 .reset-item span {
   font-size: 10.5px;
   color: var(--ink-3);
+}
+
+/* ── Label scrubbing ─────────────────────────────────────────────────── */
+
+.label.scrubbable {
+  cursor: ew-resize;
+  touch-action: none;
+  user-select: none;
+  transition: color 0.12s;
+}
+
+.label.scrubbable:hover {
+  color: var(--ink);
+  text-decoration: underline dotted var(--ink-3);
+  text-underline-offset: 3px;
+}
+
+.row.scrubbing .label {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.row.scrubbing .slider .knob {
+  background: var(--accent);
+}
+
+body.scrubbing,
+body.scrubbing * {
+  cursor: ew-resize !important;
+  user-select: none !important;
+}
+
+.scrub-hud {
+  position: fixed;
+  z-index: 300;
+  transform: translate(-50%, -100%) scale(0.96);
+  transform-origin: 50% 100%;
+  min-width: 120px;
+  padding: 7px 10px 7px;
+  background: var(--ink);
+  color: var(--on-ink);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s, transform 0.12s;
+  display: grid;
+  gap: 5px;
+  box-shadow: var(--shadow);
+}
+
+.scrub-hud.on {
+  opacity: 1;
+  transform: translate(-50%, -100%) scale(1);
+}
+
+.scrub-hud b {
+  font: 600 17px/1 var(--display);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.scrub-hud i {
+  display: block;
+  height: 2px;
+  background: color-mix(in srgb, var(--on-ink) 25%, transparent);
+}
+
+.scrub-hud i span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.scrub-hud small {
+  font-size: 10px;
+  opacity: 0.6;
+  white-space: nowrap;
+}
+
+.scrub-hud small.snap {
+  opacity: 1;
+  color: var(--accent);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ── Tooltips ────────────────────────────────────────────────────────── */
+
+.tip-pop {
+  position: fixed;
+  z-index: 400;
+  max-width: 280px;
+  padding: 6px 9px;
+  background: var(--ink);
+  color: var(--on-ink);
+  font-size: 11px;
+  line-height: 1.4;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.12s, transform 0.12s;
+  box-shadow: var(--shadow);
+}
+
+.tip-pop.on {
+  opacity: 1;
+  transform: none;
+}
+
+.tip-pop .sub {
+  opacity: 0.62;
+  font-size: 10.5px;
+}
+
+/* ── Effect finder ───────────────────────────────────────────────────── */
+
+.sec-nav {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.sec-jump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.fx-find-row {
+  display: flex;
+  gap: 6px;
+}
+
+.fx-find {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px 0 26px;
+  border: 1px solid var(--rule-2);
+  background: var(--panel) no-repeat 8px center / 12px 12px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%2385847e' stroke-width='1.4'%3E%3Ccircle cx='7' cy='7' r='4.5'/%3E%3Cpath d='m10.5 10.5 3.5 3.5'/%3E%3C/svg%3E");
+  font-size: 11px;
+}
+
+.fx-find:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.fx-find::-webkit-search-cancel-button {
+  cursor: pointer;
+}
+
+.fx-active {
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--rule-2);
+  font-size: 10.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.fx-active.on {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--on-ink);
+}
+
+/* ── Command palette ─────────────────────────────────────────────────── */
+
+.cmdk-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 250;
+  background: color-mix(in srgb, var(--bg) 62%, transparent);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 14vh;
+  animation: cmdk-in 0.14s ease-out;
+}
+
+@keyframes cmdk-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.cmdk {
+  width: min(560px, calc(100vw - 32px));
+  background: var(--panel);
+  border: 1px solid var(--ink);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  max-height: 64vh;
+}
+
+.cmdk-input {
+  height: 48px;
+  padding: 0 16px;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  background: transparent;
+  font: 500 15px/1 var(--display);
+}
+
+.cmdk-input:focus {
+  outline: none;
+}
+
+.cmdk-list {
+  overflow-y: auto;
+  padding: 4px 0 6px;
+}
+
+.cmdk-group {
+  padding: 10px 16px 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+}
+
+.cmdk-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 16px;
+  font-size: 12.5px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+
+.cmdk-item.on {
+  background: var(--panel-2);
+  border-left-color: var(--accent);
+}
+
+.cmdk-item kbd,
+.cmdk-foot span {
+  font: 500 10.5px/1 var(--font);
+  color: var(--ink-3);
+}
+
+.cmdk-item kbd {
+  border: 1px solid var(--rule-2);
+  padding: 3px 5px;
+}
+
+.cmdk-empty {
+  padding: 18px 16px;
+  color: var(--ink-3);
+}
+
+.cmdk-foot {
+  display: flex;
+  gap: 16px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--rule);
+}
+
+.meta .slow {
+  color: var(--accent);
+}
+
+.card.flash {
+  animation: card-flash 1.2s ease-out;
+}
+
+@keyframes card-flash {
+  0%,
+  30% {
+    box-shadow: inset 2px 0 0 var(--accent), 0 0 0 1px var(--accent);
+  }
 }

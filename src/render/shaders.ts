@@ -295,6 +295,17 @@ uniform vec3 uShapeCol[8];
 uniform sampler2D uSprites;
 uniform float uSpritesOn;
 
+uniform sampler2D uRidge;  // 64 columns × 64 rows of spectrum history (ring)
+uniform vec4 uRidgeP;      // on, rows, height, line half-width (uv)
+uniform vec4 uRidgeQ;      // head row, width, centre y, -
+
+float ridgeAt(int k, float x) {
+  int row = (int(uRidgeQ.x) - k + 64) % 64;
+  float f = clamp(x, 0.0, 1.0) * 63.0;
+  int i = int(floor(f));
+  return mix(texelFetch(uRidge, ivec2(i, row), 0).r, texelFetch(uRidge, ivec2(min(i + 1, 63), row), 0).r, fract(f));
+}
+
 float sdBox(vec2 q, vec2 b) {
   vec2 d = abs(q) - b;
   return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
@@ -547,6 +558,28 @@ void main() {
     over(acc, uDropCol[i], rate(a * dr.w * 0.4));
   }
 
+  // Ridges: newest line at the front; each line's body hides the ones behind it.
+  if (uRidgeP.x > 0.5) {
+    float x = (uv.x - 0.5) / uRidgeQ.y + 0.5;
+    if (x > 0.0 && x < 1.0) {
+      int rows = int(uRidgeP.y + 0.5);
+      float span = 0.62;
+      float y0 = uRidgeQ.z - span * 0.5;
+      float gap = span / float(max(rows - 1, 1));
+      float taper = pow(sin(3.1415926 * x), 2.5);
+      for (int k = 0; k < 64; k++) {
+        if (k >= rows) break;
+        float c = y0 + float(k) * gap + ridgeAt(k, x) * uRidgeP.z * 0.22 * taper;
+        if (uv.y <= c + uRidgeP.w) {
+          float a = 1.0 - smoothstep(uRidgeP.w * 0.4, uRidgeP.w, abs(uv.y - c));
+          float depth = float(k) / float(max(rows - 1, 1));
+          over(acc, palAt(uPalOff + depth * 2.0), a * (1.0 - depth * 0.55));
+          break;
+        }
+      }
+    }
+  }
+
   // Beat shapes
   for (int i = 0; i < 8; i++) {
     if (i >= uShapeCount) break;
@@ -599,6 +632,9 @@ uniform vec2 uRes;
 uniform vec4 uLiquid;
 uniform float uLiquidShine;
 uniform float uSliceGap;
+uniform vec4 uEcho;   // copies, distance, zoom, fade
+uniform vec2 uEchoDir;
+uniform vec4 uSway;   // amount, frequency, speed, axis
 
 vec2 mirrorUv(vec2 uv) {
   if (uMirror.x < 0.5) return uv;
@@ -668,13 +704,24 @@ vec2 slicesUv(vec2 uv, out float seam) {
   return uv;
 }
 
+vec2 swayUv(vec2 uv) {
+  if (uSway.x <= 0.0) return uv;
+  float ph = uTime * uSway.z * 6.2831853;
+  float a = uSway.x * 0.025;
+  int axis = int(uSway.w + 0.5);
+  if (axis != 1) uv.x += sin(uv.y * uSway.y * 6.2831853 + ph) * a;
+  if (axis != 0) uv.y += sin(uv.x * uSway.y * 6.2831853 * uAspect - ph * 0.8) * a;
+  return uv;
+}
+
 vec2 pixelUv(vec2 uv) {
   if (uPixel.x <= 1.0) return uv;
   vec2 bs = vec2(uPixel.x) / uRes;
   return (floor(uv / bs) + 0.5) * bs;
 }
 
-vec3 shade(vec2 uv) {
+/** Paint colour and opacity at uv (before it meets the background). */
+vec4 paintAt(vec2 uv) {
   vec4 d = texture(uDye, uv);
   float life = d.a;
   vec3 col = life > 1e-5 ? d.rgb / life : vec3(0.0);
@@ -689,6 +736,27 @@ vec3 shade(vec2 uv) {
     col = mix(col, min(col * 1.25 + 0.08, 1.0), rim * uLiquidShine);
     op = solid;
   }
+  return vec4(col, op);
+}
+
+vec3 shade(vec2 uv) {
+  vec4 pa = paintAt(uv);
+  if (uEcho.x > 0.5) {
+    // Copies sit behind the original, each fainter than the last.
+    vec2 c = vec2(0.5);
+    float w = 1.0;
+    for (int k = 1; k <= 8; k++) {
+      if (float(k) > uEcho.x) break;
+      w *= uEcho.w;
+      vec2 q = (uv - c) * (1.0 + uEcho.z * 0.08 * float(k)) + c - uEchoDir * uEcho.y * 0.04 * float(k);
+      vec4 g = paintAt(q);
+      float ga = g.a * w;
+      pa.rgb = mix(g.rgb, pa.rgb, pa.a / max(pa.a + ga * (1.0 - pa.a), 1e-4));
+      pa.a = pa.a + ga * (1.0 - pa.a);
+    }
+  }
+  vec3 col = pa.rgb;
+  float op = pa.a;
   if (uBlend == 1) return uBg + col * op;
   if (uBlend == 2) return mix(uBg, uBg * col, op);
   if (uBlend == 3) return 1.0 - (1.0 - uBg) * (1.0 - col * op);
@@ -711,7 +779,7 @@ vec3 hsv2rgb(vec3 c) {
 
 void main() {
   float seam;
-  vec2 uvBase = glitchUv(stretchUv(slicesUv(mirrorUv(vUv), seam)));
+  vec2 uvBase = glitchUv(stretchUv(slicesUv(mirrorUv(swayUv(vUv)), seam)));
   vec2 uv = pixelUv(uvBase);
   vec3 c;
   if (uChroma.x > 0.0) {
@@ -805,6 +873,8 @@ uniform int uDitherStyle;
 uniform vec4 uGrain;
 uniform vec2 uVignette;
 uniform vec4 uSheen;
+uniform vec4 uFlash;   // strength, mode, -, -
+uniform vec3 uFlashCol;
 
 float bayer8(ivec2 p) {
   int x = p.x & 7;
@@ -887,6 +957,11 @@ void main() {
     float d = length(p) * 1.414;
     float v = 1.0 - smoothstep(1.0 - uVignette.y * 0.9 - 0.05, 1.05, d);
     c *= mix(1.0, v, uVignette.x);
+  }
+  if (uFlash.x > 0.001) {
+    int m = int(uFlash.y + 0.5);
+    vec3 t = m == 0 ? vec3(1.0) : m == 1 ? 1.0 - clamp(c, 0.0, 1.0) : m == 2 ? uFlashCol : vec3(0.0);
+    c = mix(c, t, uFlash.x);
   }
   o = vec4(clamp(c, 0.0, 1.0), 1.0);
 }`;

@@ -323,6 +323,23 @@ export const PRESETS: Preset[] = [
       vignette: { on: true, p: { amount: 0.35 } },
     },
   },
+  {
+    id: 'pulsar',
+    name: 'Pulsar',
+    note: 'The spectrum as stacked ridgelines, scrolling back in time',
+    palette: ['#f3efe6', '#f3efe6', '#ff3b1d', '#f3efe6', '#d9d4ca'],
+    background: '#0b0b0c',
+    fx: {
+      ridges: { on: true, p: { rows: 34, height: 0.55, width: 0.6, thickness: 1.6, speed: 16, position: 0.5 }, drive: 'level', depth: 0.35 },
+      ink: { on: false },
+      time: { p: { hold: 0, fade: 0.18, bleed: 0 } },
+      colour: { p: { mode: 'direct', blend: 'normal', cycle: 'off' } },
+      flash: { on: true, p: { mode: 'white', every: '4', amount: 0.1, decay: 0.25 } },
+      glow: { on: false },
+      grain: { on: true, p: { amount: 0.22 } },
+      vignette: { on: true, p: { amount: 0.35 } },
+    },
+  },
 ];
 
 /** Apply a preset's look (effects, palette, background) to a project. */

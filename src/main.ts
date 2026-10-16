@@ -17,6 +17,11 @@ import { download, fmtTime, h, icon, toast } from './ui/dom';
 import { EffectsPanel } from './ui/effects-panel';
 import { ExportDialog } from './ui/export-dialog';
 import { UI_SCALES, installLayout } from './ui/layout';
+import { CommandPalette, type Command } from './ui/command';
+import { installTooltips } from './ui/tooltip';
+import { Section } from './ui/section';
+import { surprise } from './state/surprise';
+import { EFFECTS, GROUPS } from './state/defs';
 import { mediaPanel } from './ui/media-panel';
 import { paletteFromImage } from './ui/palette';
 import { PresetsMenu } from './ui/presets-menu';
@@ -41,6 +46,7 @@ try {
 
 const engine = new AudioEngine();
 const app = document.getElementById('app')!;
+installTooltips();
 app.className = 'app';
 
 // ── Stage ──────────────────────────────────────────────────────────────────
@@ -55,7 +61,7 @@ const splash = h(
   h('div', { class: 'small' }, 'Plays the demo track. Drop your own audio file anywhere, or pick a song on the left.'),
 );
 const frame = h('div', { class: 'canvas-frame' }, canvas, h('div', { class: 'crop' }), cornerTL, cornerTR, splash);
-const wrap = h('div', { class: 'canvas-wrap' }, frame, h('div', { class: 'drop-veil' }, 'Drop audio to load it'));
+const wrap = h('div', { class: 'canvas-wrap' }, frame, h('div', { class: 'drop-veil' }, 'Drop audio to play it, or an image or video to paint with it'));
 
 let quality = Number(localStorage.getItem('klangbild.quality') ?? 0.75) || 0.75;
 const aspectSeg = segmented<string>({
@@ -179,7 +185,14 @@ nameInput.addEventListener('keydown', (e) => {
 });
 nameInput.addEventListener('change', () => store.update('canvas', (p) => (p.name = nameInput.value.trim() || 'Untitled')));
 const presetsBtn = h('button', { type: 'button', class: 'btn', 'aria-haspopup': 'dialog' }, 'Presets') as HTMLButtonElement;
-const presets = new PresetsMenu(presetsBtn, () => resetSim(engine.time));
+const presets = new PresetsMenu(
+  presetsBtn,
+  () => {
+    resetSim(engine.time);
+    toast(`${store.p.name}`, 'info', 3200, { label: 'Undo', run: () => undoLook() });
+  },
+  () => surpriseMe(),
+);
 presetsBtn.onclick = () => presets.toggle();
 const themeBtn = h('button', { type: 'button', class: 'btn icon ghost', title: 'Light / dark', 'aria-label': 'Toggle theme', onclick: () => toggleTheme() }, icon('moon'));
 const fileInput = h('input', {
@@ -225,6 +238,26 @@ const top = h(
 app.append(top, left, stage, effects.el, timeline.el);
 const layout = installLayout(app, left, effects.el, () => timeline.refresh());
 
+/** Undo a whole-look change (preset, reset, surprise) and redraw from it. */
+function undoLook(): void {
+  store.undo();
+  resetSim(engine.time);
+}
+
+/** A new look from a random preset, nudged; the track, clip and frame stay. */
+function surpriseMe(): void {
+  let base = '';
+  store.update('all', (p) => {
+    const clip = { ...p.clip };
+    const aspect = p.aspect;
+    base = surprise(p);
+    p.clip = clip;
+    p.aspect = aspect;
+  });
+  resetSim(engine.time);
+  toast(`New look, from ${base}`, 'info', 4200, { label: 'Undo', run: () => undoLook() });
+}
+
 /** Reset everything: back to the loaded preset as it shipped, or to factory defaults. Undoable. */
 function openResetPop(anchor: HTMLElement): void {
   document.querySelector('.pop.reset-pop')?.remove();
@@ -242,7 +275,7 @@ function openResetPop(anchor: HTMLElement): void {
       p.aspect = aspect;
     });
   const item = (title: string, note: string, run: () => void) =>
-    h('button', { type: 'button', class: 'reset-item', onclick: () => { run(); close(); resetSim(engine.time); toast(`${title}. Ctrl+Z undoes it.`); } }, h('b', null, title), h('span', null, note));
+    h('button', { type: 'button', class: 'reset-item', onclick: () => { run(); close(); resetSim(engine.time); toast(title, 'info', 4200, { label: 'Undo', run: () => undoLook() }); } }, h('b', null, title), h('span', null, note));
   const pop = h(
     'div',
     { class: 'pop reset-pop', role: 'dialog', 'aria-label': 'Reset' },
@@ -353,6 +386,9 @@ function toggleHelp(): void {
     ['R', 'Back to clip start, fresh canvas'],
     ['C', 'Clear canvas'],
     ['T', 'Tap tempo (metronome)'],
+    ['G', 'Surprise me: a new look'],
+    ['Ctrl / ⌘ K', 'Command palette'],
+    ['/', 'Find an effect'],
     ['← →', 'Seek 1 s (Shift: 5 s)'],
     ['E', 'Export'],
     ['S', 'Snapshot PNG'],
@@ -360,6 +396,7 @@ function toggleHelp(): void {
     ['1 – 9, 0', 'Presets'],
     ['Ctrl Z', 'Undo (Shift: redo)'],
     ['Shift-drag', 'Fine slider control'],
+    ['Drag a label', 'Change the value (Shift: fine)'],
     ['Double-click', 'Reset a slider or its label to default'],
     ['Alt-drag', 'Move clip without snapping'],
   ];
@@ -769,8 +806,83 @@ store.on((topic) => {
 
 // ── Input ──────────────────────────────────────────────────────────────────
 
+/** An image or video dropped on the app goes straight into the Media emitter. */
+async function addMedia(f: File): Promise<void> {
+  try {
+    await media.loadFile(f);
+    store.update('fx', (p) => {
+      p.fx.media.on = true;
+      delete p.groupsOff.emit;
+    });
+    document.querySelector('[data-fx="media"]')?.classList.add('open');
+    toast(`“${f.name}” is painting into the canvas. Its settings are under Emit › Media.`);
+  } catch (err) {
+    toast((err as Error).message, 'error');
+  }
+}
+
+const commands = new CommandPalette(() => {
+  const list: Command[] = [];
+  const add = (group: string, title: string, run: () => void, keys?: string, words?: string) =>
+    list.push({ id: `${group}:${title}`, group, title, run, keys, words });
+  add('Playback', engine.playing ? 'Pause' : 'Play', () => void togglePlay(), 'Space');
+  add('Playback', 'Back to clip start', () => restart(), 'R');
+  add('Playback', 'Clear the canvas', () => resetSim(engine.time, 0), 'C', 'wipe');
+  add('Look', 'Surprise me', () => surpriseMe(), 'G', 'random generate shuffle new look');
+  add('Look', 'Browse presets', () => presets.toggle());
+  if (store.p.preset) add('Look', `Reset to ${PRESETS.find((p) => p.id === store.p.preset)?.name ?? 'preset'}`, () => { const pr = PRESETS.find((p) => p.id === store.p.preset); if (pr) { store.update('all', (p) => { const clip = { ...p.clip }; const a = p.aspect; applyPreset(p, pr); p.clip = clip; p.aspect = a; }); resetSim(engine.time); } }, undefined, 'revert');
+  add('Look', 'Undo', () => store.undo(), 'Ctrl Z');
+  add('Look', 'Redo', () => store.redo(), 'Ctrl ⇧ Z');
+  add('File', 'Export video or images…', () => openExport(), 'E', 'mp4 png jpeg render');
+  add('File', 'Snapshot this frame', () => (snapRequested = true), 'S', 'png still screenshot');
+  add('File', 'Record in real time', () => void toggleRecord(), undefined, 'capture');
+  add('File', 'Save project file', () => saveProject(), undefined, 'json');
+  add('File', 'Open project file…', () => fileInput.click(), undefined, 'json load');
+  add('Source', 'Open an audio file…', () => source.browse(), undefined, 'mp3 wav load track');
+  add('Source', 'Load the demo track', () => void loadDemo(true));
+  add('Source', 'Use the metronome', () => void useMetronome({ ...source.metro }), undefined, 'bpm tempo');
+  add('Source', 'Listen to the microphone', () => void startLive('mic'), undefined, 'live input');
+  add('Source', 'Listen to a tab or system audio', () => void startLive('tab'), undefined, 'live share');
+  for (const [i, p] of PRESETS.entries()) add('Presets', p.name, () => presets.apply(p), i < 10 ? String((i + 1) % 10) : undefined, p.note);
+  for (const e of EFFECTS) {
+    if (e.alwaysOn) continue;
+    const on = store.p.fx[e.id].on;
+    add('Effects', `${on ? 'Turn off' : 'Turn on'} ${e.label}`, () => {
+      store.update('fx', (p) => {
+        p.fx[e.id].on = !on;
+        if (!on) delete p.groupsOff[e.group];
+      });
+      if (!on) {
+        Section.reveal(e.group);
+        const card = document.querySelector(`[data-fx="${e.id}"]`);
+        card?.classList.add('open', 'flash');
+        setTimeout(() => card?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 250);
+        setTimeout(() => card?.classList.remove('flash'), 1400);
+      }
+    }, undefined, `${e.hint} ${GROUPS.find((g) => g.id === e.group)?.label ?? ''}`);
+  }
+  for (const g of GROUPS) {
+    add('Sections', `Go to ${g.label}`, () => Section.reveal(g.id), undefined, g.hint);
+    const off = !!store.p.groupsOff[g.id];
+    add('Sections', `${off ? 'Switch on' : 'Switch off'} all of ${g.label}`, () => store.update('fx', (p) => { if (off) delete p.groupsOff[g.id]; else p.groupsOff[g.id] = true; }), undefined, 'master bypass');
+  }
+  add('View', 'Find an effect or setting', () => effects.focusFind(), '/', 'search filter');
+  add('View', 'Toggle light / dark', () => toggleTheme(), undefined, 'theme');
+  add('View', 'Fullscreen', () => toggleFullscreen(), 'F');
+  add('View', 'Keyboard shortcuts', () => toggleHelp(), '?');
+  for (const a of ASPECTS) add('View', `Frame ${a.id}`, () => store.update('canvas', (p) => (p.aspect = a.id)), undefined, 'aspect ratio');
+  for (const st of STAGES) add('View', `Stage: ${st.label}`, () => { stageColour = st.id; stageSeg.set(st.id); localStorage.setItem('klangbild.stage', st.id); applyStage(); }, undefined, 'background around canvas');
+  return list;
+});
+
 window.addEventListener('keydown', (e) => {
   const tgt = e.target as HTMLElement;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    commands.toggle();
+    return;
+  }
+  if (commands.open) return;
   if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'SELECT' || tgt.isContentEditable)) return;
   if (exportDialog.open) {
     if (e.key === 'Escape') exportDialog.close();
@@ -801,6 +913,14 @@ window.addEventListener('keydown', (e) => {
     case 't':
     case 'T':
       source.tapNow();
+      break;
+    case 'g':
+    case 'G':
+      surpriseMe();
+      break;
+    case '/':
+      e.preventDefault();
+      effects.focusFind();
       break;
     case 'c':
     case 'C':
@@ -855,6 +975,10 @@ window.addEventListener('drop', (e) => {
   app.classList.remove('dragging');
   const f = e.dataTransfer?.files?.[0];
   if (!f) return;
+  if (/^(image|video)\//.test(f.type)) {
+    void addMedia(f);
+    return;
+  }
   if (f.name.endsWith('.json')) {
     f.text().then((t) => {
       try {
@@ -872,6 +996,8 @@ window.addEventListener('drop', (e) => {
 let lastUi = 0;
 let lastFrame = performance.now();
 let frames = 0;
+let slowSeconds = 0;
+let slowHinted = false;
 let silentSince = 0;
 let silenceWarned = false;
 
@@ -959,7 +1085,23 @@ function loop(now: number): void {
 
   frames++;
   if (now - fpsStamp > 1000) {
-    fpsEl.textContent = `${Math.round((frames * 1000) / (now - fpsStamp))} fps`;
+    const fps = Math.round((frames * 1000) / (now - fpsStamp));
+    fpsEl.textContent = `${fps} fps`;
+    fpsEl.classList.toggle('slow', engine.playing && fps < 30);
+    // Offer Draft once if playback has been choppy for a few seconds.
+    slowSeconds = engine.playing && fps < 26 && quality > 0.5 ? slowSeconds + 1 : 0;
+    if (slowSeconds >= 4 && !slowHinted) {
+      slowHinted = true;
+      toast('Playback is running slowly on this computer. Draft preview keeps it smooth; exports stay full quality.', 'info', 9000, {
+        label: 'Use Draft',
+        run: () => {
+          quality = 0.5;
+          qualitySeg.set(0.5);
+          localStorage.setItem('klangbild.quality', '0.5');
+          sizeStage();
+        },
+      });
+    }
     frames = 0;
     fpsStamp = now;
   }

@@ -25,11 +25,11 @@ The panels are numbered in signal-flow order:
 |---|---|---|
 | 01 | **Source** | A local audio file (fully analysed), a SoundCloud track (search or paste a link), live input (microphone, a browser tab, or the whole system), or a **metronome** at any tempo (see below). |
 | 02 | **Response** | Where beats come from and how strongly the sound pushes the picture. Drag the red window over the live spectrum to choose the frequencies that trigger beats (kick, snare, hats or any custom band), or switch to *Beat track* to lock to the detected tempo (every bar, half, beat, eighth or sixteenth). Set sensitivity, the minimum gap between hits (down to 20 ms), reactivity, low/mid/high gains, attack and release, and an A/V offset. |
-| 03 | **Emit** | What paints colour in: *Orbs*, *Spectrum* (strata, columns, radial, horizon), *Waveform*, *Beat Ink* (each beat drops a new colour that bleeds outward), *Cloud*, *Particles* (see below), *Shapes* (rings, squares, triangles, bars and crosses stamped on the beat), *Scope* (an oscilloscope figure: the signal plotted against a delayed copy of itself), and *Media* (your image, video or camera; see below). |
+| 03 | **Emit** | What paints colour in: *Orbs*, *Spectrum* (strata, columns, radial, horizon), *Waveform*, *Beat Ink* (each beat drops a new colour that bleeds outward), *Cloud*, *Particles* (see below), *Shapes* (rings, squares, triangles, bars and crosses stamped on the beat), *Scope* (an oscilloscope figure: the signal plotted against a delayed copy of itself), *Ridges* (the spectrum over time as stacked ridgelines, with hidden lines removed), and *Media* (your image, video or camera; see below). |
 | 04 | **Motion** | How paint moves: a real *Fluid* simulation with buoyancy, a curl-noise *Flow Field* with detail and lean, directional *Drift* with per-column streaks, hardness and wobble, *Zoom / Spin* with twist around any centre, *Melt* (heavy paint drips in uneven columns) and *Ripple* (each beat sends a ring wave through the paint). They all mix into one velocity field. |
 | 05 | **Time** | *Hold* keeps colour at full strength, then it *fades out* over the time you set, so the canvas never gets overloaded. *Bleed* lets colours diffuse into each other. *Fade in* eases the clip in. |
 | 06 | **Colour** | Five-colour palette and ground colour, built-in palettes plus your own (see below), blend mode, direct / gradient-map / spectral mapping, and when a new colour arrives (every beat, every bar, over time). |
-| 07 | **Post** | Mirror and kaleidoscope, pixel stretch, glitch, *Slices* (the image cut into sliding strips), *Pixelate*, RGB split, soft focus, *Liquid* (soft paint turned into solid shapes with crisp edges), *Sheen* (iridescent film with glowing ridges), glow, contour lines, dither/halftone, film grain, vignette. |
+| 07 | **Post** | Mirror and kaleidoscope, pixel stretch, glitch, *Slices* (the image cut into sliding strips), *Pixelate*, RGB split, soft focus, *Liquid* (soft paint turned into solid shapes with crisp edges), *Sheen* (iridescent film with glowing ridges), glow, contour lines, dither/halftone, film grain, vignette, *Echo* (fading copies trailing behind or zooming in), *Sway* (a travelling sine ripple) and *Flash* (a strobe on the beat: white, black, inverted or your accent colour). |
 
 Each section folds away when you're not using it (click its header; Alt-click to keep only that one open), and shows a one-line summary while folded. The strip at the top of the effects column jumps to any section. Each effect card has a reset button.
 
@@ -52,11 +52,16 @@ Every effect has a **drive** chip. Pick Low, Mid, High, Level or Beat and a dept
 - **Time** rises steadily from the start to the end of the clip, so a look can build.
 - **Wave** swings slowly every two bars of the track's tempo.
 
-**Presets** are sixteen starting points, each built differently and wired to react strongly. The panel shows a rendered preview of each one; hover to see it move. Keys 1–9 and 0 load the first ten: *Ember, Supernova, Konstrukt, Marble, Phosphor, Corona, Murmuration, Liquid Slice, Opal, Pastel Melt*. The rest are *Pixel Rain, Paper Bleed, Drip, Thermal, Mandala* and *Capsule*. The previews are rendered with `node scripts/render-previews.cjs`, which needs the dev server, Playwright and ffmpeg.
+**Presets** are seventeen starting points, each built differently and wired to react strongly. The panel shows a rendered preview of each one; hover to see it move. Keys 1–9 and 0 load the first ten: *Ember, Supernova, Konstrukt, Marble, Phosphor, Corona, Murmuration, Liquid Slice, Opal, Pastel Melt*. The rest are *Pixel Rain, Paper Bleed, Drip, Thermal, Mandala, Capsule* and *Pulsar*. **Surprise me** (G) builds a new look from a random preset, with a borrowed palette, every setting nudged and sometimes an extra emitter or post effect. The previews are rendered with `node scripts/render-previews.cjs`, which needs the dev server, Playwright and ffmpeg.
 
 ### Small things
 
+- **Drag a setting's label** sideways to change it, like a dial. Slow movements are precise and fast flicks cover the whole range; hold Shift for fine control. The default value (and zero) catch the drag briefly so they're easy to land on, a readout follows along, and Esc puts the value back. Labels of option rows step through the options the same way.
 - **Double-click a setting's label** (or its slider) to put it back to its default value.
+- **Command palette** (Ctrl/⌘ K): type a few letters to run anything, such as an action, a preset, switching an effect on or off, a section, the frame or the stage colour.
+- **Find** (/) at the top of the effects column filters every effect and setting as you type; **On only** shows just the effects that are on.
+- **Undo from the toast**: loading a preset, a reset or a surprise look shows a toast with Undo.
+- **Drop an image or video** anywhere on the app to paint with it (Emit › Media); drop audio to play it.
 - **Reset** (top bar) takes everything back to the preset you loaded, or to the factory defaults.
 - **Your own colours**: click any of the five palette swatches (or *Ground*) to open the colour picker. It has a saturation/brightness field, a hue strip, a hex field, an eyedropper that picks from anywhere on screen (Chrome and Edge), lighter and darker shades, and your recent colours.
 - **Palettes**: ⇄ reverses the order, the dice shuffles a new palette, and **Save** keeps the current one with the built-ins (right-click a saved palette to delete it).
@@ -164,7 +169,7 @@ It would **not** unlock streaming-service audio such as Spotify's, because those
 
 ## Shortcuts
 
-`Space` play/pause · `R` back to clip start · `C` clear canvas · `T` tap tempo · `← →` seek (Shift: 5 s) · `E` export · `S` snapshot · `F` fullscreen · `1–9`, `0` presets · `Ctrl/Cmd Z` undo (Shift: redo) · Shift-drag a slider for fine control · double-click a slider or its label to reset it to default.
+`Space` play/pause · `R` back to clip start · `C` clear canvas · `T` tap tempo · `G` surprise me · `/` find an effect · `Ctrl/Cmd K` command palette · `← →` seek (Shift: 5 s) · `E` export · `S` snapshot · `F` fullscreen · `1–9`, `0` presets · `Ctrl/Cmd Z` undo (Shift: redo) · Shift-drag a slider for fine control · drag a label to change its value, double-click a slider or its label to reset it to default.
 
 Projects autosave in the browser. Use the save/open icons to keep `.klangbild.json` project files.
 

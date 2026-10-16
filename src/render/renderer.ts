@@ -134,6 +134,11 @@ export class Renderer {
   private shapes: Shape[] = [];
   private sprites: Sprites;
   private partAcc = 0;
+  private ridgeTex: WebGLTexture;
+  private ridgeHist = new Float32Array(64 * 64);
+  private ridgeHead = 0;
+  private ridgeAcc = 0;
+  private flashAt = -10;
   private scopeGain = 1;
   private scopeAngle = 0;
   private ripples: { x: number; y: number; age: number }[] = [];
@@ -217,6 +222,13 @@ export class Renderer {
     this.waveTex = mkData(WAVE_SIZE);
     this.specTex = mkData(BAND_COUNT);
     this.sprites = new Sprites(gl, this.formats);
+    this.ridgeTex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, this.ridgeTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, 64, 64, 0, gl.RED, gl.FLOAT, this.ridgeHist);
     this.mediaTex = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, this.mediaTex);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -333,6 +345,10 @@ export class Renderer {
     this.drops = [];
     this.shapes = [];
     this.partAcc = 0;
+    this.ridgeHist.fill(0);
+    this.ridgeHead = 0;
+    this.ridgeAcc = 0;
+    this.flashAt = -10;
     this.scopeGain = 1;
     this.scopeAngle = 0;
     this.sprites.reset();
@@ -545,6 +561,32 @@ export class Renderer {
     }
     for (const sh of this.shapes) sh.age += dt;
     this.shapes = this.shapes.filter((sh) => sh.age < sh.life);
+
+    // Ridges: push a new line of spectrum history at the chosen rate.
+    if (this.on('ridges')) {
+      this.ridgeAcc += dt * this.val('ridges', 'speed');
+      let pushed = false;
+      while (this.ridgeAcc >= 1) {
+        this.ridgeAcc -= 1;
+        this.ridgeHead = (this.ridgeHead + 1) % 64;
+        const row = this.ridgeHead * 64;
+        for (let c = 0; c < 64; c++) {
+          // Mirrored: lows in the middle, highs toward both edges.
+          const u = Math.abs(c / 63 - 0.5) * 2;
+          const b = u * (BAND_COUNT - 1);
+          const i = Math.floor(b);
+          const v = f.spectrum[i] + (f.spectrum[Math.min(BAND_COUNT - 1, i + 1)] - f.spectrum[i]) * (b - i);
+          this.ridgeHist[row + c] = Math.max(0, v);
+        }
+        pushed = true;
+      }
+      if (pushed) {
+        gl.activeTexture(gl.TEXTURE6);
+        gl.bindTexture(gl.TEXTURE_2D, this.ridgeTex);
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 64, 64, gl.RED, gl.FLOAT, this.ridgeHist);
+      }
+    }
+    if (this.on('flash') && f.beatNow && f.beatCount % (Number(this.sel('flash', 'every')) || 1) === 0) this.flashAt = this.simTime;
 
     this.sprites.begin();
     if (this.on('particles')) this.stepParticles(dt, aspect, f, cycle);
@@ -792,6 +834,12 @@ export class Renderer {
       sc.set(sh.col, i * 3);
     });
     P.i('uShapeCount', this.shapes.length).v4('uShapes', sa).v4('uShapeB', sb).v3('uShapeCol', sc);
+    if (this.on('ridges')) {
+      const px = Math.max(0.5, this.val('ridges', 'thickness')) / 1080;
+      P.tex('uRidge', 6, this.ridgeTex)
+        .f('uRidgeP', 1, Math.round(this.val('ridges', 'rows')), this.val('ridges', 'height'), px * 1.5)
+        .f('uRidgeQ', this.ridgeHead, this.val('ridges', 'width'), this.val('ridges', 'position'), 0);
+    } else P.f('uRidgeP', 0, 0, 0, 0);
     if (this.sprites.used && this.sprites.layer) P.tex('uSprites', 5, this.sprites.layer.tex).f('uSpritesOn', 1);
     else P.f('uSpritesOn', 0);
 
@@ -904,6 +952,15 @@ export class Renderer {
     C.f('uRes', this.width, this.height);
     if (this.on('pixelate')) C.f('uPixel', Math.max(1, this.val('pixelate', 'size') * pxs), this.val('pixelate', 'mix'));
     else C.f('uPixel', 0, 1);
+    if (this.on('echo')) {
+      const ea = (this.val('echo', 'angle') * Math.PI) / 180;
+      C.f('uEcho', Math.round(this.val('echo', 'copies')), this.val('echo', 'distance'), this.val('echo', 'zoom'), this.val('echo', 'decay'));
+      C.f('uEchoDir', (Math.cos(ea) / aspect) * 1, Math.sin(ea));
+    } else C.f('uEcho', 0, 0, 0, 0);
+    if (this.on('sway')) {
+      const ax = ['h', 'v', 'both'].indexOf(this.sel('sway', 'axis'));
+      C.f('uSway', this.val('sway', 'amount'), this.val('sway', 'frequency'), this.val('sway', 'speed'), Math.max(0, ax));
+    } else C.f('uSway', 0, 1, 0, 0);
     if (this.on('liquid')) {
       C.f('uLiquid', Math.max(0.01, this.val('liquid', 'edge')), this.val('liquid', 'softness'), this.val('liquid', 'holes'), 0).f('uLiquidShine', this.val('liquid', 'shine'));
     } else C.f('uLiquid', 0, 0, 0, 0).f('uLiquidShine', 0);
@@ -955,6 +1012,11 @@ export class Renderer {
     else F.f('uGrain', 0, 1, 0, 0);
     if (this.on('vignette')) F.f('uVignette', this.val('vignette', 'amount'), this.val('vignette', 'softness'));
     else F.f('uVignette', 0, 0);
+    if (this.on('flash')) {
+      const env = Math.exp(-Math.max(0, this.simTime - this.flashAt) / Math.max(0.02, this.val('flash', 'decay')));
+      const mode = ['white', 'invert', 'accent', 'black'].indexOf(this.sel('flash', 'mode'));
+      F.f('uFlash', env * this.val('flash', 'amount'), Math.max(0, mode), 0, 0).f('uFlashCol', this.pal[0], this.pal[1], this.pal[2]);
+    } else F.f('uFlash', 0, 0, 0, 0);
     if (this.on('sheen')) F.f('uSheen', this.val('sheen', 'amount'), this.val('sheen', 'ridges'), this.val('sheen', 'scale'), Math.max(1, 1.5 * pxScale));
     else F.f('uSheen', 0, 0, 1, 1);
     this.draw(null);

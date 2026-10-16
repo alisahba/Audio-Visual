@@ -47,6 +47,10 @@ export class EffectsPanel {
   private cards = new Map<string, CardRefs>();
   private sections = new Map<string, Section>();
   private navButtons = new Map<string, HTMLElement>();
+  private findInput!: HTMLInputElement;
+  private activeBtn!: HTMLButtonElement;
+  private activeOnly = false;
+  private paletteEl!: HTMLElement;
   private swatches: HTMLElement[] = [];
   private bgSwatch!: HTMLElement;
   private paletteList!: HTMLElement;
@@ -56,14 +60,43 @@ export class EffectsPanel {
 
   /** `extras` adds custom UI at the top of an effect card (e.g. the media picker). */
   constructor(private extras: Record<string, HTMLElement> = {}) {
+    this.findInput = h('input', {
+      class: 'fx-find',
+      type: 'search',
+      placeholder: 'Find an effect or setting',
+      'aria-label': 'Find an effect or setting',
+      spellcheck: 'false',
+    }) as HTMLInputElement;
+    this.findInput.addEventListener('input', () => this.applyFilter());
+    this.findInput.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Escape') {
+        this.findInput.value = '';
+        this.applyFilter();
+        this.findInput.blur();
+      } else if (e.key === 'Enter') {
+        const first = [...this.cards.values()].find((c) => c.card.style.display !== 'none');
+        first?.card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+    this.activeBtn = h(
+      'button',
+      { type: 'button', class: 'fx-active', title: 'Show only the effects that are switched on', 'aria-pressed': 'false', onclick: () => this.toggleActiveOnly() },
+      'On only',
+    ) as HTMLButtonElement;
     const nav = h(
       'nav',
       { class: 'sec-nav', 'aria-label': 'Sections' },
-      GROUPS.map((g) => {
-        const b = h('button', { type: 'button', title: g.hint, onclick: () => Section.reveal(g.id) }, h('b', null, g.num), ` ${g.label}`);
-        this.navButtons.set(g.id, b);
-        return b;
-      }),
+      h(
+        'div',
+        { class: 'sec-jump' },
+        GROUPS.map((g) => {
+          const b = h('button', { type: 'button', title: g.hint, onclick: () => Section.reveal(g.id) }, h('b', null, g.num), ` ${g.label}`);
+          this.navButtons.set(g.id, b);
+          return b;
+        }),
+      ),
+      h('div', { class: 'fx-find-row' }, this.findInput, this.activeBtn),
     );
     this.el = h('aside', { class: 'panel right', 'aria-label': 'Effects' }, nav);
     for (const g of GROUPS) {
@@ -76,7 +109,7 @@ export class EffectsPanel {
           }),
       });
       this.sections.set(g.id, sec);
-      if (g.id === 'colour') sec.body.appendChild(this.paletteBlock());
+      if (g.id === 'colour') sec.body.appendChild((this.paletteEl = this.paletteBlock()));
       for (const e of EFFECTS.filter((x) => x.group === g.id)) sec.body.appendChild(this.card(e));
       this.el.appendChild(sec.el);
     }
@@ -213,6 +246,47 @@ export class EffectsPanel {
     this.pop = null;
   }
 
+  /** Focus the finder (the / key). */
+  focusFind(): void {
+    this.findInput.focus();
+    this.findInput.select();
+  }
+
+  private toggleActiveOnly(): void {
+    this.activeOnly = !this.activeOnly;
+    this.activeBtn.classList.toggle('on', this.activeOnly);
+    this.activeBtn.setAttribute('aria-pressed', String(this.activeOnly));
+    this.applyFilter();
+  }
+
+  /** Hide cards that don't match the finder text (or are off, in "On only"). */
+  private applyFilter(): void {
+    const q = this.findInput.value.trim().toLowerCase();
+    const p = store.p;
+    const shown = new Map<string, number>();
+    for (const e of EFFECTS) {
+      const refs = this.cards.get(e.id)!;
+      const text = [e.label, e.hint, GROUPS.find((g) => g.id === e.group)?.label ?? '', ...e.params.map((d) => d.label)].join(' ').toLowerCase();
+      const match = !q || q.split(/\s+/).every((w) => text.includes(w));
+      const live = !this.activeOnly || e.alwaysOn || p.fx[e.id].on;
+      const vis = match && live;
+      refs.card.style.display = vis ? '' : 'none';
+      if (vis) shown.set(e.group, (shown.get(e.group) ?? 0) + 1);
+      if (q && vis) refs.card.classList.add('open');
+    }
+    const palMatch = !q || 'palette colour color ground swatch'.includes(q) || q.split(/\s+/).every((w) => 'palette colours colors ground'.includes(w));
+    this.paletteEl.style.display = palMatch ? '' : 'none';
+    if (palMatch && q) shown.set('colour', (shown.get('colour') ?? 0) + 1);
+    const filtering = !!q || this.activeOnly;
+    for (const g of GROUPS) {
+      const sec = this.sections.get(g.id)!;
+      const n = shown.get(g.id) ?? 0;
+      sec.el.style.display = filtering && !n ? 'none' : '';
+      if (q && n) sec.setOpen(true, false);
+    }
+    this.el.classList.toggle('filtering', filtering);
+  }
+
   private paletteBlock(): HTMLElement {
     const wrap = h('div', { class: 'palette-block' });
     const head = h('div', { class: 'sub-head' }, h('span', null, 'Palette'));
@@ -341,6 +415,7 @@ export class EffectsPanel {
     }
     for (let i = 0; i < 5; i++) this.swatches[i].style.background = p.palette[i];
     this.bgSwatch.style.background = p.background;
+    if (this.activeOnly) this.applyFilter();
     // Colour summary shows the palette itself.
     const colSec = this.sections.get('colour')!;
     colSec.el.style.setProperty('--sw', `linear-gradient(90deg, ${p.palette.join(',')})`);

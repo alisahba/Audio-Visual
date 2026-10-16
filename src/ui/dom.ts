@@ -117,14 +117,35 @@ export function cssVar(name: string): string {
 }
 
 let toastHost: HTMLElement | null = null;
-export function toast(msg: string, kind: 'info' | 'error' = 'info', ms = 4200): void {
+export interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
+/** A short message; with an action (e.g. Undo) it stays a little longer. */
+export function toast(msg: string, kind: 'info' | 'error' = 'info', ms = 4200, action?: ToastAction): void {
   if (!toastHost) {
-    toastHost = h('div', { class: 'toasts' });
+    toastHost = h('div', { class: 'toasts', role: 'status', 'aria-live': 'polite' });
     document.body.appendChild(toastHost);
   }
-  const t = h('div', { class: `toast ${kind === 'error' ? 'error' : ''}` }, msg);
+  // Same message twice in a row replaces the old one rather than stacking.
+  const last = toastHost.lastElementChild as HTMLElement | null;
+  if (last?.dataset.msg === msg) last.remove();
+  const t = h('div', { class: `toast ${kind === 'error' ? 'error' : ''}`, 'data-msg': msg }, h('span', null, msg));
+  const leave = () => {
+    t.classList.add('out');
+    setTimeout(() => t.remove(), 180);
+  };
+  if (action) {
+    t.appendChild(
+      h('button', { type: 'button', class: 'toast-act', onclick: () => (action.run(), leave()) }, action.label),
+    );
+  }
   toastHost.appendChild(t);
-  setTimeout(() => t.remove(), ms);
+  while (toastHost.children.length > 4) toastHost.firstElementChild?.remove();
+  let timer = setTimeout(leave, action ? Math.max(ms, 6000) : ms);
+  t.addEventListener('pointerenter', () => clearTimeout(timer));
+  t.addEventListener('pointerleave', () => (timer = setTimeout(leave, 1800)));
 }
 
 export function download(blob: Blob, name: string): void {
