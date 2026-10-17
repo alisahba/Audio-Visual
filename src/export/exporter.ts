@@ -1,13 +1,7 @@
 import {
-  ALL_FORMATS,
   AudioBufferSource,
-  BlobSource,
   BufferTarget,
   CanvasSource,
-  Conversion,
-  Input,
-  EncodedPacketSink,
-  EncodedVideoPacketSource,
   Mp4OutputFormat,
   Output,
   getFirstEncodableAudioCodec,
@@ -285,123 +279,33 @@ export async function runExport(
   }
 }
 
-// Collects what the speakers play (or the live input) as raw stereo samples.
-const TAP_WORKLET = `
-class Tap extends AudioWorkletProcessor {
-  process(inputs) {
-    const i = inputs[0];
-    if (i && i.length) {
-      const l = i[0];
-      const r = i[1] || i[0];
-      this.port.postMessage({ t: currentTime, l: l.slice(), r: r.slice() });
-    }
-    return true;
-  }
-}
-registerProcessor('klangbild-tap', Tap);`;
-
-class SoundTap {
-  private chunks: { t: number; l: Float32Array; r: Float32Array }[] = [];
-  private node: AudioWorkletNode | null = null;
-  private mute: GainNode | null = null;
-
-  constructor(private ctx: AudioContext) {}
-
-  async start(src: AudioNode[]): Promise<void> {
-    const url = URL.createObjectURL(new Blob([TAP_WORKLET], { type: 'text/javascript' }));
-    try {
-      await this.ctx.audioWorklet.addModule(url);
-    } finally {
-      URL.revokeObjectURL(url);
-    }
-    this.node = new AudioWorkletNode(this.ctx, 'klangbild-tap', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2], channelCount: 2, channelCountMode: 'explicit' });
-    this.node.port.onmessage = (e) => this.chunks.push(e.data);
-    for (const n of src) n.connect(this.node);
-    // A silent path to the output keeps the node running.
-    this.mute = this.ctx.createGain();
-    this.mute.gain.value = 0;
-    this.node.connect(this.mute).connect(this.ctx.destination);
-  }
-
-  /** Stop and return the sound from context time `t0` on, as an AudioBuffer. */
-  finish(src: AudioNode[], t0: number, seconds: number): AudioBuffer | null {
-    if (this.node) {
-      for (const n of src) {
-        try {
-          n.disconnect(this.node);
-        } catch {
-          /* gone */
-        }
-      }
-      this.node.port.onmessage = null;
-      this.node.disconnect();
-      this.mute?.disconnect();
-    }
-    if (!this.chunks.length) return null;
-    const sr = this.ctx.sampleRate;
-    const len = Math.max(1, Math.round(seconds * sr));
-    const buf = new AudioBuffer({ length: len, numberOfChannels: 2, sampleRate: sr });
-    const L = buf.getChannelData(0);
-    const R = buf.getChannelData(1);
-    for (const c of this.chunks) {
-      const at = Math.round((c.t - t0) * sr);
-      for (let i = 0; i < c.l.length; i++) {
-        const j = at + i;
-        if (j < 0 || j >= len) continue;
-        L[j] = c.l[i];
-        R[j] = c.r[i];
-      }
-    }
-    return buf;
-  }
-}
-
-/**
- * Real-time recording of the preview canvas plus the sound (what you hear, or
- * the live input). Video is encoded as it plays; the sound is captured raw and
- * joined to it when recording stops, so one can never stall the other. The
- * result is a high-bitrate master; `transcodeRecording` makes the final file.
- */
+/** Real-time recording of the preview canvas (for live and streamed sources). */
 export class Recorder {
+  private output: Output;
+  private source: CanvasSource;
   private start = 0;
-  private startCtx = 0;
   private last = -1;
   private busy = false;
   frames = 0;
 
   private constructor(
-    private output: Output,
-    private source: CanvasSource,
+    output: Output,
+    source: CanvasSource,
     private fps: number,
-    private tap: SoundTap | null,
-    private sound: AudioNode[],
-  ) {}
-
-  get hasAudio(): boolean {
-    return !!this.tap;
+  ) {
+    this.output = output;
+    this.source = source;
   }
 
-  /** `sound` are the nodes to record from (their output is tapped, not changed). */
-  static async create(canvas: HTMLCanvasElement, fps = 30, ctx: AudioContext | null = null, sound: AudioNode[] = [], bitrate = 24_000_000): Promise<Recorder> {
+  static async create(canvas: HTMLCanvasElement, fps = 30, bitrate = 16_000_000): Promise<Recorder> {
     const codec = await videoCodecFor(canvas.width, canvas.height, bitrate);
     if (!codec) throw new Error('This browser cannot encode video. Use Chrome or Edge.');
     const output = new Output({ format: new Mp4OutputFormat({ fastStart: 'in-memory' }), target: new BufferTarget() });
     const source = new CanvasSource(canvas, { codec, bitrate, keyFrameInterval: 2, sizeChangeBehavior: 'contain' });
     output.addVideoTrack(source, { frameRate: fps });
     await output.start();
-    let tap: SoundTap | null = null;
-    if (ctx && sound.length) {
-      try {
-        tap = new SoundTap(ctx);
-        await tap.start(sound);
-      } catch (err) {
-        console.warn('Sound capture unavailable', err);
-        tap = null;
-      }
-    }
-    const r = new Recorder(output, source, fps, tap, sound);
+    const r = new Recorder(output, source, fps);
     r.start = performance.now();
-    r.startCtx = ctx?.currentTime ?? 0;
     return r;
   }
 
@@ -424,89 +328,12 @@ export class Recorder {
   }
 
   async stop(): Promise<Blob> {
-    const seconds = this.elapsed;
     this.source.close();
     await this.output.finalize();
-    const video = new Blob([(this.output.target as BufferTarget).buffer!], { type: 'video/mp4' });
-    const pcm = this.tap?.finish(this.sound, this.startCtx, seconds) ?? null;
-    if (!pcm) return video;
-    try {
-      return await joinSound(video, pcm);
-    } catch (err) {
-      console.warn('Could not add the sound to the recording', err);
-      return video;
-    }
+    return new Blob([(this.output.target as BufferTarget).buffer!], { type: 'video/mp4' });
   }
 
   async cancel(): Promise<void> {
-    this.tap?.finish(this.sound, this.startCtx, 0);
     await this.output.cancel();
   }
-}
-
-/** Copy the encoded video as-is and encode the captured sound next to it. */
-async function joinSound(video: Blob, pcm: AudioBuffer): Promise<Blob> {
-  const input = new Input({ source: new BlobSource(video), formats: ALL_FORMATS });
-  const track = await input.getPrimaryVideoTrack();
-  if (!track || !track.codec) throw new Error('No video in the recording');
-  const config = await track.getDecoderConfig();
-  const output = new Output({ format: new Mp4OutputFormat({ fastStart: 'in-memory' }), target: new BufferTarget() });
-  const vsrc = new EncodedVideoPacketSource(track.codec);
-  output.addVideoTrack(vsrc, { frameRate: 30 });
-  const ac = await getFirstEncodableAudioCodec(['aac', 'opus'], { numberOfChannels: 2, sampleRate: pcm.sampleRate, bitrate: 256_000 });
-  if (!ac) throw new Error('This browser cannot encode audio');
-  const asrc = new AudioBufferSource({ codec: ac, bitrate: 256_000 });
-  output.addAudioTrack(asrc);
-  await output.start();
-  let first = true;
-  for await (const packet of new EncodedPacketSink(track).packets()) {
-    await vsrc.add(packet, first && config ? { decoderConfig: config } : undefined);
-    first = false;
-  }
-  vsrc.close();
-  await asrc.add(pcm);
-  asrc.close();
-  await output.finalize();
-  return new Blob([(output.target as BufferTarget).buffer!], { type: 'video/mp4' });
-}
-
-export interface TranscodeOptions {
-  /** Shorter side in pixels; 0 keeps the recorded size. */
-  short: number;
-  bitrate: number;
-  audio: boolean;
-}
-
-/** Re-encode a recording at the chosen size, bitrate and with or without sound. */
-export async function transcodeRecording(blob: Blob, o: TranscodeOptions, onProgress: (v: number) => void, signal: AbortSignal): Promise<Blob> {
-  const input = new Input({ source: new BlobSource(blob), formats: ALL_FORMATS });
-  const output = new Output({ format: new Mp4OutputFormat({ fastStart: 'in-memory' }), target: new BufferTarget() });
-  const vt = await input.getPrimaryVideoTrack();
-  let width: number | undefined;
-  let height: number | undefined;
-  if (vt && o.short) {
-    const w = vt.displayWidth;
-    const hh = vt.displayHeight;
-    const k = o.short / Math.min(w, hh);
-    if (k < 1) {
-      width = Math.round((w * k) / 2) * 2;
-      height = Math.round((hh * k) / 2) * 2;
-    }
-  }
-  const conversion = await Conversion.init({
-    input,
-    output,
-    video: { width, height, fit: width ? 'fill' : undefined, bitrate: o.bitrate, keyFrameInterval: 2, forceTranscode: true },
-    audio: o.audio ? { bitrate: 192_000 } : { discard: true },
-  });
-  if (!conversion.isValid) throw new Error('This recording can’t be converted in this browser.');
-  conversion.onProgress = (v) => onProgress(v);
-  const stop = () => void conversion.cancel();
-  signal.addEventListener('abort', stop);
-  try {
-    await conversion.execute();
-  } finally {
-    signal.removeEventListener('abort', stop);
-  }
-  return new Blob([(output.target as BufferTarget).buffer!], { type: 'video/mp4' });
 }

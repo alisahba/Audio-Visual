@@ -17,7 +17,6 @@ import { download, fmtTime, h, icon, toast } from './ui/dom';
 import { EffectsPanel } from './ui/effects-panel';
 import { ExportDialog } from './ui/export-dialog';
 import { UI_SCALES, installLayout } from './ui/layout';
-import { showRecordDialog } from './ui/record-dialog';
 import { CommandPalette, type Command } from './ui/command';
 import { installTooltips } from './ui/tooltip';
 import { Section } from './ui/section';
@@ -768,10 +767,9 @@ async function toggleRecord(): Promise<void> {
     recorder = null;
     timeline.setRecording(false);
     try {
-      const seconds = r.elapsed;
       const blob = await r.stop();
-      if (engine.playing) engine.pause();
-      showRecordDialog(blob, { width: canvas.width, height: canvas.height, seconds, hasAudio: r.hasAudio });
+      download(blob, `klangbild-live-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.mp4`);
+      toast(`Recorded ${r.frames} frames.`);
     } catch (err) {
       toast(`Recording failed: ${(err as Error).message}`, 'error');
     }
@@ -783,10 +781,10 @@ async function toggleRecord(): Promise<void> {
       qualitySeg.set(1);
       sizeStage();
     }
-    recorder = await Recorder.create(canvas, 30, engine.ctx, engine.soundNodes());
+    recorder = await Recorder.create(canvas, 30);
     timeline.setRecording(true);
-    toast(recorder.hasAudio ? 'Recording picture and sound. Press Stop when you’re done.' : 'Recording the picture (sound capture isn’t available in this browser).');
-    if (!engine.playing) void togglePlay();
+    toast('Recording the canvas in real time (video only).');
+    if (engine.external && !engine.playing) void togglePlay();
   } catch (err) {
     recorder = null;
     toast(`Can’t record: ${(err as Error).message}`, 'error');

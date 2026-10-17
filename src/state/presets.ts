@@ -49,11 +49,11 @@ export const PRESETS: Preset[] = [
     palette: ['#fff4d6', '#ffb13b', '#ff2e6e', '#3ad7ff', '#8b5bff'],
     background: '#05040a',
     fx: {
-      particles: { on: true, p: { mode: 'burst', amount: 0.15, size: 4, pulse: 0.35, life: 1.4, speed: 1.2, chaos: 0.25, gravity: 0, follow: 0.6, spread: 0.7, ink: 0.5 }, drive: 'level', depth: 0.3 },
+      particles: { on: true, p: { mode: 'burst', amount: 0.24, size: 4, life: 1.4, speed: 1.2, chaos: 0.25, gravity: 0, follow: 0.6, spread: 0.7, ink: 0.75 }, drive: 'level', depth: 0.3 },
       fluid: { on: true, p: { force: 0.45, swirl: 0.55, viscosity: 0.2, stir: 0.08 }, drive: 'beat', depth: 0.5 },
       ripple: { on: true, p: { strength: 0.3, speed: 0.8, width: 0.12, origin: 'random' } },
       ink: { on: false },
-      time: { p: { hold: 0.05, fade: 0.6, bleed: 0.02 } },
+      time: { p: { hold: 0.1, fade: 1.1, bleed: 0.03 } },
       colour: { p: { mode: 'direct', blend: 'normal', cycle: 'beat', saturation: 1.1 } },
       glow: { on: true, p: { intensity: 0.45, threshold: 0.5, radius: 0.7 }, drive: 'beat', depth: 0.45 },
       chroma: { on: true, p: { amount: 0.18 }, drive: 'beat', depth: 0.5 },

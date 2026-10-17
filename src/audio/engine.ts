@@ -396,11 +396,6 @@ export class AudioEngine {
     }
   }
 
-  /** Nodes whose sound a recording should capture: the output, plus live input (which isn't played). */
-  soundNodes(): AudioNode[] {
-    return this.streamNode ? [this.out, this.streamNode] : [this.out];
-  }
-
   /** Hear the source or not (the analysis and visuals carry on). */
   setMonitor(on: boolean): void {
     this.monitor.gain.setTargetAtTime(on ? 1 : 0, this.ctx.currentTime, 0.01);
