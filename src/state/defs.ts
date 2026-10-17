@@ -130,7 +130,7 @@ export const EFFECTS: EffectDef[] = [
     hint: 'Each beat drops a new colour that bleeds into the image',
     defaultOn: true,
     params: [
-      r('size', 'Size', 0.05, 1, 0.38),
+      r('size', 'Size', 0.05, 3, 0.38),
       r('bleed', 'Spread time', 0.1, 4, 1.2, 0.05, 's', 2),
       r('push', 'Push', 0, 1, 0.5),
       r('drops', 'Drops', 1, 4, 1, 1, '', 0),
@@ -353,6 +353,8 @@ export const EFFECTS: EffectDef[] = [
       s('blend', 'Blend', [['normal', 'Normal'], ['add', 'Add'], ['multiply', 'Multiply'], ['screen', 'Screen']], 'normal'),
       s('cycle', 'Cycle on', [['beat', 'Beat'], ['bar', 'Bar'], ['time', 'Time'], ['off', 'Off']], 'beat'),
       r('hue', 'Hue shift', -180, 180, 0, 1, '°', 0),
+      r('hueSpeed', 'Hue drift', -1, 1, 0, 0.01, '', 2),
+      r('hueStep', 'Hue on beat', 0, 180, 0, 1, '°', 0),
       r('saturation', 'Saturation', 0, 2, 1),
       r('contrast', 'Contrast', 0.5, 2, 1),
       r('exposure', 'Exposure', -1, 1, 0),

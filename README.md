@@ -28,7 +28,7 @@ The panels are numbered in signal-flow order:
 | 03 | **Emit** | What paints colour in: *Orbs*, *Spectrum* (strata, columns, radial, horizon), *Waveform*, *Beat Ink* (each beat drops a new colour that bleeds outward), *Cloud*, *Particles* (see below), *Shapes* (rings, squares, triangles, bars and crosses stamped on the beat), *Scope* (an oscilloscope figure: the signal plotted against a delayed copy of itself), *Ridges* (the spectrum over time as stacked ridgelines, with hidden lines removed), and *Media* (your image, video or camera; see below). |
 | 04 | **Motion** | How paint moves: a real *Fluid* simulation with buoyancy, a curl-noise *Flow Field* with detail and lean, directional *Drift* with per-column streaks, hardness and wobble, *Zoom / Spin* with twist around any centre, *Melt* (heavy paint drips in uneven columns) and *Ripple* (each beat sends a ring wave through the paint). They all mix into one velocity field. |
 | 05 | **Time** | *Hold* keeps colour at full strength, then it *fades out* over the time you set, so the canvas never gets overloaded. *Bleed* lets colours diffuse into each other. *Fade in* eases the clip in. |
-| 06 | **Colour** | Five-colour palette and ground colour, built-in palettes plus your own (see below), blend mode, direct / gradient-map / spectral mapping, and when a new colour arrives (every beat, every bar, over time). |
+| 06 | **Colour** | Five-colour palette and ground colour, built-in palettes plus your own (see below), blend mode, direct / gradient-map / spectral mapping, when a new colour arrives (every beat, every bar, over time), and *Hue drift* / *Hue on beat* so the colours keep travelling. |
 | 07 | **Post** | Mirror and kaleidoscope, pixel stretch, glitch, *Slices* (the image cut into sliding strips), *Pixelate*, RGB split, soft focus, *Liquid* (soft paint turned into solid shapes with crisp edges), *Sheen* (iridescent film with glowing ridges), glow, contour lines, dither/halftone, film grain, vignette, *Echo* (fading copies trailing behind or zooming in), *Sway* (a travelling sine ripple) and *Flash* (a strobe on the beat: white, black, inverted or your accent colour). |
 
 Each section folds away when you're not using it (click its header; Alt-click to keep only that one open), and shows a one-line summary while folded. The strip at the top of the effects column jumps to any section. Each effect card has a reset button.
@@ -110,7 +110,7 @@ Export renders **offline, frame by frame**, at a fixed 60 Hz simulation step, so
 - **Still**: the frame at the playhead at full resolution. `S` saves a quick snapshot of the preview.
 - **Warm-up** runs the simulation for a moment before the first frame so the clip doesn't open on an empty canvas.
 
-Live input and the SoundCloud player can't be rendered offline, because their audio only exists while it plays. For those, **Record** captures the canvas in real time to MP4 (video only). SoundCloud tracks loaded in full mode render offline like a file, but the exported video never includes SoundCloud's audio.
+Live input and the SoundCloud player can't be rendered offline, because their audio only exists while it plays. For those (or for capturing a live performance with any source), **Record** captures the canvas *and the sound* in real time. When you stop, a dialog lets you preview it and choose size and quality before saving the MP4. SoundCloud tracks loaded in full mode render offline like a file, but the exported video never includes SoundCloud's audio.
 
 ## SoundCloud
 

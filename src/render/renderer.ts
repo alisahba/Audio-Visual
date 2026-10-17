@@ -139,6 +139,10 @@ export class Renderer {
   private ridgeHead = 0;
   private ridgeAcc = 0;
   private flashAt = -10;
+  /** Hue travel from the Colour section's drift and per-beat steps (degrees). */
+  private hueDrift = 0;
+  private hueBeat = 0;
+  private hueBeatTarget = 0;
   private scopeGain = 1;
   private scopeAngle = 0;
   private ripples: { x: number; y: number; age: number }[] = [];
@@ -349,6 +353,7 @@ export class Renderer {
     this.ridgeHead = 0;
     this.ridgeAcc = 0;
     this.flashAt = -10;
+    this.hueDrift = this.hueBeat = this.hueBeatTarget = 0;
     this.scopeGain = 1;
     this.scopeAngle = 0;
     this.sprites.reset();
@@ -415,6 +420,10 @@ export class Renderer {
     else if (cycle === 'bar' && f.barNow) this.palTarget += 1;
     else if (cycle === 'time') this.palTarget = t * 0.25;
     this.palOff += (this.palTarget - this.palOff) * (1 - Math.exp(-dt / 0.25));
+    // Hue that wanders over time and/or steps on each beat, so colours never settle.
+    this.hueDrift = (this.hueDrift + dt * this.val('colour', 'hueSpeed') * 30) % 360;
+    if (f.beatNow) this.hueBeatTarget += this.val('colour', 'hueStep');
+    this.hueBeat += (this.hueBeatTarget - this.hueBeat) * (1 - Math.exp(-dt / 0.12));
     if (cycle === 'off') this.palOff = this.palTarget = 0;
 
     // Beat ink drops.
@@ -921,7 +930,7 @@ export class Renderer {
       .f('uIntro', introK)
       .i('uMode', mode === 'gradient' ? 1 : mode === 'spectral' ? 2 : 0)
       .i('uBlend', ['normal', 'add', 'multiply', 'screen'].indexOf(blend))
-      .f('uHue', colourOn ? (this.val('colour', 'hue') * Math.PI) / 180 : 0)
+      .f('uHue', colourOn ? (((this.val('colour', 'hue') + this.hueDrift + this.hueBeat) % 360) * Math.PI) / 180 : 0)
       .f('uSat', colourOn ? this.val('colour', 'saturation') : 1)
       .f('uContrast', colourOn ? this.val('colour', 'contrast') : 1)
       .f('uExposure', colourOn ? this.val('colour', 'exposure') : 0);

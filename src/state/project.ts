@@ -65,6 +65,12 @@ export const ASPECTS: { id: string; w: number; h: number }[] = [
   { id: '3:4', w: 3, h: 4 },
   { id: '9:16', w: 9, h: 16 },
   { id: '16:9', w: 16, h: 9 },
+  // Matches this screen, so fullscreen playback fills it edge to edge.
+  {
+    id: 'Screen',
+    w: typeof screen !== 'undefined' ? screen.width : 16,
+    h: typeof screen !== 'undefined' ? screen.height : 9,
+  },
 ];
 
 export function aspectRatio(id: string): number {
