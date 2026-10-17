@@ -159,27 +159,9 @@ void main() {
   o = vec4(clamp(v, -1000.0, 1000.0), 0.0, 1.0);
 }`;
 
-export const VISC_FS = `${HEAD}
-uniform sampler2D uVel;
-uniform sampler2D uVel0;
-uniform vec2 uTexel;
-uniform float uAlpha;
-void main() {
-  vec2 L = texture(uVel, vUv - vec2(uTexel.x, 0.0)).xy;
-  vec2 R = texture(uVel, vUv + vec2(uTexel.x, 0.0)).xy;
-  vec2 T = texture(uVel, vUv + vec2(0.0, uTexel.y)).xy;
-  vec2 B = texture(uVel, vUv - vec2(0.0, uTexel.y)).xy;
-  vec2 v0 = texture(uVel0, vUv).xy;
-  o = vec4((v0 + uAlpha * (L + R + T + B)) / (1.0 + 4.0 * uAlpha), 0.0, 1.0);
-}`;
 export const DIVERGENCE_FS = `${HEAD}
 uniform sampler2D uVel;
 uniform vec2 uTexel;
-uniform float uAspect;
-// Pressure sources: the projection turns these into outward flow, so things
-// can push the fluid aside (an ink drop landing) without spinning it.
-uniform int uSrcCount;
-uniform vec4 uSrc[8];   // x, y (uv), radius², strength
 void main() {
   float L = texture(uVel, vUv - vec2(uTexel.x, 0.0)).x;
   float R = texture(uVel, vUv + vec2(uTexel.x, 0.0)).x;
@@ -190,14 +172,7 @@ void main() {
   if (vUv.x + uTexel.x > 1.0) R = -C.x;
   if (vUv.y + uTexel.y > 1.0) T = -C.y;
   if (vUv.y - uTexel.y < 0.0) B = -C.y;
-  float div = 0.5 * (R - L + T - B);
-  for (int i = 0; i < 8; i++) {
-    if (i >= uSrcCount) break;
-    vec2 d = vUv - uSrc[i].xy;
-    d.x *= uAspect;
-    div -= uSrc[i].w * exp(-dot(d, d) / uSrc[i].z);
-  }
-  o = vec4(div, 0.0, 0.0, 1.0);
+  o = vec4(0.5 * (R - L + T - B), 0.0, 0.0, 1.0);
 }`;
 
 export const PRESSURE_FS = `${HEAD}
@@ -309,8 +284,6 @@ uniform float uWaveThick;
 uniform int uDropCount;
 uniform vec4 uDrops[12];
 uniform vec3 uDropCol[12];
-uniform vec2 uInkP;   // distortion, softness
-uniform vec4 uDropB[12];   // outward push (uv/s), blend, -, -
 
 uniform vec4 uCloud;
 
@@ -439,20 +412,6 @@ void main() {
     float w = uRippleP.y;
     float prof = exp(-((r - front) * (r - front)) / (w * w)) * sin((r - front) / w * 3.14159);
     vec2 v = (d / max(r, 1e-4)) * prof * rp.w;
-    v.x /= uAspect;
-    vel += v;
-  }
-
-  // Ink drops shove the paint around them outward while they grow.
-  for (int i = 0; i < 12; i++) {
-    if (i >= uDropCount) break;
-    float pv = uDropB[i].x;
-    if (pv <= 0.0) continue;
-    vec2 d = p - uDrops[i].xy;
-    float r = length(d);
-    float R = max(uDrops[i].z, 0.01);
-    float prof = r < R ? r / R : exp(-(r - R) / (0.6 * R + 0.02));
-    vec2 v = d / max(r, 1e-4) * pv * prof;
     v.x /= uAspect;
     vel += v;
   }
@@ -593,15 +552,10 @@ void main() {
     if (i >= uDropCount) break;
     vec4 dr = uDrops[i];
     vec2 d = p - dr.xy;
-    float n = uInkP.x > 0.0 ? snoise(vec3(d * 3.5 / max(dr.z, 0.05), float(i) * 7.3 + uSeed)) : 0.0;
-    float dist = length(d) * (1.0 + n * 0.5 * uInkP.x);
-    // Softness 0 gives a crisp disc, 1 the original cloudy falloff.
-    float a = 1.0 - smoothstep(dr.z * (1.0 - 0.75 * uInkP.y) - uRef.y * 1.5, dr.z, dist);
-    // Blend: the new colour takes on some of what it lands in, so colours fade into each other.
-    float bl = uDropB[i].y;
-    vec3 under = prev.a > 1e-4 ? prev.rgb / prev.a : uDropCol[i];
-    vec3 col = mix(uDropCol[i], under, bl * 0.6 * clamp(prev.a * 1.5, 0.0, 1.0) * (1.0 - a * 0.35));
-    over(acc, col, rate(a * dr.w * 0.4 * (1.0 - 0.45 * bl)));
+    float n = snoise(vec3(d * 3.5 / max(dr.z, 0.05), float(i) * 7.3 + uSeed));
+    float dist = length(d) * (1.0 + n * 0.25);
+    float a = 1.0 - smoothstep(dr.z * 0.25, dr.z, dist);
+    over(acc, uDropCol[i], rate(a * dr.w * 0.4));
   }
 
   // Ridges: newest line at the front; each line's body hides the ones behind it.
