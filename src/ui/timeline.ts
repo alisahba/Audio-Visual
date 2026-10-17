@@ -71,7 +71,7 @@ export class Timeline {
     this.hlWrap = h('span', { class: 'hl' });
     this.infoEl = h('span', { class: 'muted' });
     this.songLabel = h('span', { class: 'muted' }, 'Drag the window');
-    this.recBtn = h('button', { type: 'button', class: 'btn small', style: 'display:none', onclick: () => act.toggleRecord() }, icon('rec'), 'Record') as HTMLButtonElement;
+    this.recBtn = h('button', { type: 'button', class: 'btn small', style: 'display:none', title: 'Record what you see and hear in real time, while you play with the controls', onclick: () => act.toggleRecord() }, icon('rec'), 'Record') as HTMLButtonElement;
     this.dropBtn = h(
       'button',
       { type: 'button', class: 'btn small', title: 'Move the clip to the most energetic part of the track', onclick: () => this.jumpHighlight(0) },
@@ -226,7 +226,7 @@ export class Timeline {
     const kind = this.engine.kind;
     const live = kind === 'live' && !this.engine.info?.duration;
     this.songLabel.textContent = live ? 'Live input' : this.engine.analysis ? 'Drag the window' : this.songDuration ? 'Drag the window' : '—';
-    this.recBtn.style.display = this.engine.kind === 'live' || this.engine.kind === 'external' ? '' : 'none';
+    this.recBtn.style.display = this.engine.kind === 'none' ? 'none' : '';
     const an = this.engine.analysis;
     this.infoEl.textContent = an ? `${an.bpm.toFixed(1)} BPM · ${fmtTime(this.songDuration, 0)}` : this.songDuration ? fmtTime(this.songDuration, 0) : '';
     this.history = [];

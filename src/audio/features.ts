@@ -79,12 +79,15 @@ export class FeatureFollower {
       const tau = x > prev ? att : rel;
       return prev + (x - prev) * (1 - Math.exp(-dt / Math.max(0.004, tau)));
     };
-    f.low = env(f.low, raw.low * a.low, a.attack, a.release);
-    f.mid = env(f.mid, raw.mid * a.mid, a.attack, a.release);
-    f.high = env(f.high, raw.high * a.high, a.attack, a.release * 0.7);
-    f.level = env(f.level, raw.level, a.attack, a.release);
+    // Reactivity is the master for everything that follows loudness: emitters,
+    // spectrum shapes and every drive. Beat triggers themselves don't depend on it.
+    const r = a.reactivity;
+    f.low = env(f.low, raw.low * a.low * r, a.attack, a.release);
+    f.mid = env(f.mid, raw.mid * a.mid * r, a.attack, a.release);
+    f.high = env(f.high, raw.high * a.high * r, a.attack, a.release * 0.7);
+    f.level = env(f.level, raw.level * r, a.attack, a.release);
     for (let b = 0; b < BAND_COUNT; b++) {
-      const g = BAND_CENTRES[b] < RANGE_LOW[1] ? a.low : BAND_CENTRES[b] < RANGE_MID[1] ? a.mid : a.high;
+      const g = (BAND_CENTRES[b] < RANGE_LOW[1] ? a.low : BAND_CENTRES[b] < RANGE_MID[1] ? a.mid : a.high) * r;
       f.spectrum[b] = env(f.spectrum[b], raw.bands[b] * g, a.attack * 0.5, a.release * 0.6);
     }
     f.samples.set(raw.wave);

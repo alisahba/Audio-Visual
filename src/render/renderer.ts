@@ -139,6 +139,10 @@ export class Renderer {
   private ridgeHead = 0;
   private ridgeAcc = 0;
   private flashAt = -10;
+  /** Hue travel from the Colour section's drift and per-beat steps (degrees). */
+  private hueDrift = 0;
+  private hueBeat = 0;
+  private hueBeatTarget = 0;
   private scopeGain = 1;
   private scopeAngle = 0;
   private ripples: { x: number; y: number; age: number }[] = [];
@@ -154,7 +158,6 @@ export class Renderer {
   private palOff = 0;
   private palTarget = 0;
   private prevOrbs: number[] = [];
-  private stirAcc = 0;
   private glitchSeed = 0;
   private lastDrop: { x: number; y: number } | null = null;
   private pal = new Float32Array(15);
@@ -349,6 +352,7 @@ export class Renderer {
     this.ridgeHead = 0;
     this.ridgeAcc = 0;
     this.flashAt = -10;
+    this.hueDrift = this.hueBeat = this.hueBeatTarget = 0;
     this.scopeGain = 1;
     this.scopeAngle = 0;
     this.sprites.reset();
@@ -356,7 +360,6 @@ export class Renderer {
     this.palOff = 0;
     this.palTarget = 0;
     this.prevOrbs = [];
-    this.stirAcc = 0;
     this.glitchSeed = 0;
     this.ripples = [];
     this.sliceSeed = 0;
@@ -415,6 +418,10 @@ export class Renderer {
     else if (cycle === 'bar' && f.barNow) this.palTarget += 1;
     else if (cycle === 'time') this.palTarget = t * 0.25;
     this.palOff += (this.palTarget - this.palOff) * (1 - Math.exp(-dt / 0.25));
+    // Hue that wanders over time and/or steps on each beat, so colours never settle.
+    this.hueDrift = (this.hueDrift + dt * this.val('colour', 'hueSpeed') * 30) % 360;
+    if (f.beatNow) this.hueBeatTarget += this.val('colour', 'hueStep');
+    this.hueBeat += (this.hueBeatTarget - this.hueBeat) * (1 - Math.exp(-dt / 0.12));
     if (cycle === 'off') this.palOff = this.palTarget = 0;
 
     // Beat ink drops.
@@ -509,12 +516,21 @@ export class Renderer {
     if (this.on('fluid')) {
       const stir = project.fx.fluid.p.stir as number;
       const force = this.val('fluid', 'force');
-      this.stirAcc += dt * stir * 4;
-      while (this.stirAcc >= 1) {
-        this.stirAcc -= 1;
-        const a = rnd() * Math.PI * 2;
-        const m = (600 + rnd() * 1400) * force * (0.4 + f.level);
-        this.splats.push({ x: 0.1 + rnd() * 0.8, y: 0.1 + rnd() * 0.8, dx: Math.cos(a) * m, dy: Math.sin(a) * m, r: (0.004 + rnd() * 0.01) * this.splatScale(), radial: false });
+      // Stir: two slow "spoons" on smooth paths keep the fluid moving with no
+      // sudden kicks. They use the set force (not its beat drive) and swell with loudness.
+      if (stir > 0) {
+        const base = project.fx.fluid.p.force as number;
+        for (let k = 0; k < 2; k++) {
+          const ph = this.seed * 1.7 + k * 2.1;
+          const w = 0.11 + k * 0.05;
+          const px = 0.5 + 0.32 * Math.sin(t * w * 2.3 + ph);
+          const py = 0.5 + 0.3 * Math.sin(t * w * 1.7 + ph * 1.3);
+          const vx = 0.32 * w * 2.3 * Math.cos(t * w * 2.3 + ph);
+          const vy = 0.3 * w * 1.7 * Math.cos(t * w * 1.7 + ph * 1.3);
+          const len = Math.hypot(vx, vy) || 1;
+          const m = 260 * stir * base * (0.5 + f.level);
+          this.splats.push({ x: px, y: py, dx: (vx / len) * m, dy: (vy / len) * m, r: 0.006 * this.splatScale(), radial: false });
+        }
       }
       if (f.beatNow && project.fx.fluid.drive === 'beat') {
         const a = rnd() * Math.PI * 2;
@@ -557,6 +573,18 @@ export class Renderer {
           col: [this.pal[ci * 3], this.pal[ci * 3 + 1], this.pal[ci * 3 + 2]],
         });
         while (this.shapes.length > 8) this.shapes.shift();
+        const push = this.val('shapes', 'push');
+        if (this.on('fluid') && push > 0) {
+          // Shove the fluid outward from the shape's edge, like a drop landing.
+          const r0 = Math.max(0.03, this.val('shapes', 'size') * 0.5);
+          const m = push * 1100 * (0.5 + (project.fx.fluid.p.force as number));
+          for (let k = 0; k < 6; k++) {
+            const a = (k / 6) * Math.PI * 2 + rnd() * 0.5;
+            const ux = Math.cos(a);
+            const uy = Math.sin(a);
+            this.splats.push({ x: (x + ux * r0) / aspect + 0.5, y: y + uy * r0 + 0.5, dx: ux * m, dy: uy * m, r: (r0 * r0 * 0.04 + 0.0015) * this.splatScale(), radial: false });
+          }
+        }
       }
     }
     for (const sh of this.shapes) sh.age += dt;
@@ -602,6 +630,7 @@ export class Renderer {
     const amount = this.val('particles', 'amount');
     const life = this.val('particles', 'life');
     const spread = this.val('particles', 'spread');
+    const pulse = this.val('particles', 'pulse');
     // Population the emitter aims for; quadratic so the low end stays usable.
     const target = 60 + amount * amount * (MAX_PARTICLES - 60);
     let spawn = 0;
@@ -610,13 +639,15 @@ export class Renderer {
     let colour = this.palOff;
     if (mode === 0) {
       if (f.beatNow) {
-        spawn = Math.min(MAX_PARTICLES / 3, target * 0.3 * (0.6 + f.level * 0.6));
+        spawn = Math.min(MAX_PARTICLES / 3, target * (0.2 + 0.4 * pulse) * (0.6 + f.level * 0.6));
         ex = (rnd() - 0.5) * aspect * 0.8 * spread;
         ey = (rnd() - 0.5) * 0.8 * spread;
         colour = cycle === 'off' ? Math.floor(rnd() * 5) : Math.round(this.palTarget);
       }
     } else {
-      this.partAcc += (dt * target * (mode === 4 ? 2.2 : 1)) / Math.max(0.2, life);
+      // Continuous modes breathe with loudness and surge on every beat.
+      this.partAcc += ((dt * target * (mode === 4 ? 2.2 : 1)) / Math.max(0.2, life)) * (0.45 + Math.min(1.5, f.level));
+      if (f.beatNow) this.partAcc += target * 0.22 * pulse;
       spawn = Math.floor(this.partAcc);
       this.partAcc -= spawn;
       if (mode === 1) ex = (rnd() - 0.5) * spread * 0.2 * aspect;
@@ -641,7 +672,7 @@ export class Renderer {
       phys: [this.val('particles', 'speed') * 0.6, this.val('particles', 'chaos'), this.val('particles', 'gravity'), this.val('particles', 'follow')],
       life,
       colour,
-      kick: f.beat,
+      kick: f.beat * (0.3 + pulse),
       size: (this.val('particles', 'size') * minSide) / 1080,
       opacity: this.val('particles', 'ink'),
       fluid: this.on('fluid') ? this.vel.read.tex : null,
@@ -821,7 +852,7 @@ export class Renderer {
       dd.set([d.x, d.y, d.r * (0.25 + grow * 0.75), Math.pow(1 - k, 1.5)], i * 4);
       dc.set(d.col, i * 3);
     });
-    P.i('uDropCount', this.drops.length).v4('uDrops', dd).v3('uDropCol', dc);
+    P.i('uDropCount', this.drops.length).v4('uDrops', dd).v3('uDropCol', dc).f('uInkP', this.val('ink', 'warp'), this.val('ink', 'soft'));
 
     const sa = new Float32Array(32);
     const sb = new Float32Array(32);
@@ -921,7 +952,7 @@ export class Renderer {
       .f('uIntro', introK)
       .i('uMode', mode === 'gradient' ? 1 : mode === 'spectral' ? 2 : 0)
       .i('uBlend', ['normal', 'add', 'multiply', 'screen'].indexOf(blend))
-      .f('uHue', colourOn ? (this.val('colour', 'hue') * Math.PI) / 180 : 0)
+      .f('uHue', colourOn ? (((this.val('colour', 'hue') + this.hueDrift + this.hueBeat) % 360) * Math.PI) / 180 : 0)
       .f('uSat', colourOn ? this.val('colour', 'saturation') : 1)
       .f('uContrast', colourOn ? this.val('colour', 'contrast') : 1)
       .f('uExposure', colourOn ? this.val('colour', 'exposure') : 0);

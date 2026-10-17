@@ -10,6 +10,8 @@ export function modulated(project: Project, f: Features | null, fx: string, key:
   if (!f || !def.drive || def.drive.param !== key || st.drive === 'none') return base;
   const pd = def.params.find((d) => d.key === key) as RangeParam;
   const src = f[st.drive];
-  const v = base + st.depth * src * (pd.max - pd.min) * project.audio.reactivity;
+  // Reactivity is already in the features; Beat and the time drives follow it here.
+  const k = st.drive === 'beat' || st.drive === 'time' || st.drive === 'wave' ? (st.drive === 'beat' ? project.audio.reactivity : 1) : 1;
+  const v = base + st.depth * src * (pd.max - pd.min) * k;
   return Math.min(pd.max, Math.max(pd.min, v));
 }

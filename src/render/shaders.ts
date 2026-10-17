@@ -284,6 +284,7 @@ uniform float uWaveThick;
 uniform int uDropCount;
 uniform vec4 uDrops[12];
 uniform vec3 uDropCol[12];
+uniform vec2 uInkP;   // distortion, softness
 
 uniform vec4 uCloud;
 
@@ -552,9 +553,10 @@ void main() {
     if (i >= uDropCount) break;
     vec4 dr = uDrops[i];
     vec2 d = p - dr.xy;
-    float n = snoise(vec3(d * 3.5 / max(dr.z, 0.05), float(i) * 7.3 + uSeed));
-    float dist = length(d) * (1.0 + n * 0.25);
-    float a = 1.0 - smoothstep(dr.z * 0.25, dr.z, dist);
+    float n = uInkP.x > 0.0 ? snoise(vec3(d * 3.5 / max(dr.z, 0.05), float(i) * 7.3 + uSeed)) : 0.0;
+    float dist = length(d) * (1.0 + n * 0.5 * uInkP.x);
+    // Softness 0 gives a crisp disc, 1 the original cloudy falloff.
+    float a = 1.0 - smoothstep(dr.z * (1.0 - 0.75 * uInkP.y) - uRef.y * 1.5, dr.z, dist);
     over(acc, uDropCol[i], rate(a * dr.w * 0.4));
   }
 

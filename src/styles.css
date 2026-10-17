@@ -2561,3 +2561,21 @@ body.scrubbing * {
     box-shadow: inset 2px 0 0 var(--accent), 0 0 0 1px var(--accent);
   }
 }
+
+.rec-video {
+  display: block;
+  width: 100%;
+  max-height: 420px;
+  background: #000;
+}
+
+.btn-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 6px;
+}
+
+.btn-grid .btn {
+  justify-content: center;
+  min-width: 0;
+}

@@ -12,6 +12,9 @@ const SIZES = [
   { id: 1440, label: '1440p' },
   { id: 2160, label: '4K' },
 ];
+// This screen's own pixel size, so an export can match it exactly.
+const screenShort = Math.round((Math.min(screen.width, screen.height) * Math.min(2, window.devicePixelRatio || 1)) / 2) * 2;
+if (!SIZES.some((x) => x.id === screenShort)) SIZES.push({ id: screenShort, label: 'Screen' });
 const QUALITY = [
   { id: 'std', label: 'Standard', bpp: 0.12 },
   { id: 'high', label: 'High', bpp: 0.22 },

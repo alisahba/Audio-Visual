@@ -278,7 +278,7 @@ export class SourcePanel {
       { class: 'stack' },
       h(
         'div',
-        { class: 'hstack' },
+        { class: 'btn-grid' },
         h('button', { type: 'button', class: 'btn', onclick: () => this.act.startLive('tab') }, icon('screen'), 'Tab or system audio'),
         h('button', { type: 'button', class: 'btn', onclick: () => this.act.startLive('mic') }, icon('mic'), 'Microphone'),
       ),

@@ -87,10 +87,10 @@ export class ResponsePanel {
       return r;
     };
     const sens = R('sens', 'Sensitivity', 0, 1, 0.01, 0.5, () => store.p.audio.beat.sensitivity, (v) => store.update('beat', (p) => (p.audio.beat.sensitivity = v)), undefined, undefined, 'Higher finds quieter hits');
-    const hold = R('hold', 'Min gap', 20, 1000, 5, 120, () => store.p.audio.beat.hold, (v) => store.update('beat', (p) => (p.audio.beat.hold = v)), 'ms', undefined, 'Shortest time between two beats; within it the stronger hit wins');
+    const hold = R('hold', 'Min gap', 0, 1000, 5, 120, () => store.p.audio.beat.hold, (v) => store.update('beat', (p) => (p.audio.beat.hold = v)), 'ms', undefined, 'Shortest time between two beats; within it the stronger hit wins');
     this.onsetRows = h('div', null, sens.row, hold.row);
 
-    const react = R('react', 'Reactivity', 0, 2, 0.01, 1, () => store.p.audio.reactivity, (v) => store.update('audio', (p) => (p.audio.reactivity = v)), undefined, undefined, 'Master amount for every audio drive');
+    const react = R('react', 'Reactivity', 0, 2, 0.01, 1, () => store.p.audio.reactivity, (v) => store.update('audio', (p) => (p.audio.reactivity = v)), undefined, undefined, 'Master: how strongly loudness moves the picture (emitters, spectrum and every drive). It doesn’t change which beats are found.');
     const gain = (k: 'low' | 'mid' | 'high', label: string) => {
       const r = R(k, label, 0, 2, 0.01, 1, () => store.p.audio[k], (v) => store.update('audio', (p) => (p.audio[k] = v)));
       const lvl = h('div', { class: 'lvl' });
@@ -114,7 +114,8 @@ export class ResponsePanel {
       this.onsetRows,
       this.divRow,
       h('div', { class: 'note', style: 'margin-top:6px' }, this.countEl),
-      h('div', { class: 'sub-head', style: 'margin-top:18px' }, h('span', null, 'Amount')),
+      h('div', { class: 'sub-head', style: 'margin-top:18px' }, h('span', null, 'How much the sound moves the picture')),
+      h('div', { class: 'note', style: 'margin:-2px 0 6px' }, 'These scale the music’s energy before it reaches the effects; beat detection above is separate. The bars show each range live.'),
       react.row,
       gain('low', 'Low'),
       gain('mid', 'Mid'),
