@@ -49,11 +49,11 @@ export const PRESETS: Preset[] = [
     palette: ['#fff4d6', '#ffb13b', '#ff2e6e', '#3ad7ff', '#8b5bff'],
     background: '#05040a',
     fx: {
-      particles: { on: true, p: { mode: 'burst', amount: 0.24, size: 4, life: 1.4, speed: 1.2, chaos: 0.25, gravity: 0, follow: 0.6, spread: 0.7, ink: 0.75 }, drive: 'level', depth: 0.3 },
+      particles: { on: true, p: { mode: 'burst', amount: 0.15, size: 4, pulse: 0.35, life: 1.4, speed: 1.2, chaos: 0.25, gravity: 0, follow: 0.6, spread: 0.7, ink: 0.5 }, drive: 'level', depth: 0.3 },
       fluid: { on: true, p: { force: 0.45, swirl: 0.55, viscosity: 0.2, stir: 0.08 }, drive: 'beat', depth: 0.5 },
       ripple: { on: true, p: { strength: 0.3, speed: 0.8, width: 0.12, origin: 'random' } },
       ink: { on: false },
-      time: { p: { hold: 0.1, fade: 1.1, bleed: 0.03 } },
+      time: { p: { hold: 0.05, fade: 0.6, bleed: 0.02 } },
       colour: { p: { mode: 'direct', blend: 'normal', cycle: 'beat', saturation: 1.1 } },
       glow: { on: true, p: { intensity: 0.45, threshold: 0.5, radius: 0.7 }, drive: 'beat', depth: 0.45 },
       chroma: { on: true, p: { amount: 0.18 }, drive: 'beat', depth: 0.5 },
@@ -86,7 +86,7 @@ export const PRESETS: Preset[] = [
     background: '#0b0610',
     fx: {
       fluid: { on: true, p: { force: 1.4, swirl: 0.85, viscosity: 0.12, stir: 0.5 }, drive: 'beat', depth: 0.7 },
-      ink: { on: true, p: { size: 0.3, bleed: 0.6, push: 1, drops: 2 }, drive: 'low', depth: 0.5 },
+      ink: { on: true, p: { size: 0.3, bleed: 0.6, push: 0.8, curl: 0.85, blend: 0.2, drops: 2 }, drive: 'low', depth: 0.5 },
       time: { p: { hold: 0.6, fade: 2.5, bleed: 0.02 } },
       colour: { p: { mode: 'direct', blend: 'normal', cycle: 'beat', saturation: 1.3 } },
       contour: { on: true, p: { lines: 8, width: 0.1, mix: 0.2, ink: 'dark' } },
@@ -232,7 +232,7 @@ export const PRESETS: Preset[] = [
     palette: ['#ff8a7a', '#ffc46b', '#8fb3ff', '#ff9ad5', '#9ee0c0'],
     background: '#efe6d2',
     fx: {
-      ink: { on: true, p: { size: 0.32, bleed: 2.2, drops: 1, push: 0.35, placement: 'random', every: '2' }, drive: 'low', depth: 0.45 },
+      ink: { on: true, p: { size: 0.32, bleed: 2.2, drops: 1, push: 0.6, curl: 0.2, blend: 0.6, placement: 'random', every: '2' }, drive: 'low', depth: 0.45 },
       fluid: { on: true, p: { force: 0.35, swirl: 0.25, viscosity: 0.55, stir: 0.1 }, drive: 'beat', depth: 0.4 },
       time: { p: { hold: 0.8, fade: 3.2, bleed: 0.35 } },
       colour: { p: { mode: 'direct', blend: 'multiply', cycle: 'beat' } },
@@ -270,7 +270,7 @@ export const PRESETS: Preset[] = [
     background: '#120036',
     fx: {
       orbs: { on: true, p: { shape: 'circle', count: 3, size: 0.24, soft: 0.85, speed: 0.3, spread: 0.6 }, drive: 'low', depth: 0.55 },
-      ink: { on: true, p: { size: 0.3, bleed: 0.9, push: 0.8, drops: 1 }, drive: 'low', depth: 0.5 },
+      ink: { on: true, p: { size: 0.3, bleed: 0.9, push: 0.8, curl: 0.4, drops: 1 }, drive: 'low', depth: 0.5 },
       fluid: { on: true, p: { force: 0.6, swirl: 0.4, viscosity: 0.35, stir: 0.2 }, drive: 'beat', depth: 0.6 },
       time: { p: { hold: 0.2, fade: 1.3, bleed: 0.25 } },
       colour: { p: { mode: 'gradient', blend: 'normal', cycle: 'off' } },

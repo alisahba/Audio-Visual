@@ -132,6 +132,8 @@ export class Renderer {
 
   private drops: Drop[] = [];
   private shapes: Shape[] = [];
+  /** Short-lived pressure sources (outward pushes) for the fluid. */
+  private sources: { x: number; y: number; r2: number; s: number; age: number; tau: number }[] = [];
   private sprites: Sprites;
   private partAcc = 0;
   private ridgeTex: WebGLTexture;
@@ -209,6 +211,7 @@ export class Renderer {
     P('comp', S.COMPOSITE_FS);
     P('down', S.DOWN_FS);
     P('buoy', S.BUOY_FS);
+    P('visc', S.VISC_FS);
     P('up', S.UP_FS);
     P('final', S.FINAL_FS);
 
@@ -347,6 +350,7 @@ export class Renderer {
     this.frame = 0;
     this.drops = [];
     this.shapes = [];
+    this.sources = [];
     this.partAcc = 0;
     this.ridgeHist.fill(0);
     this.ridgeHead = 0;
@@ -451,9 +455,17 @@ export class Renderer {
         this.drops.push({ x, y, r: size * (0.75 + rnd() * 0.5) * 0.5, age: 0, life, col });
         this.lastDrop = { x, y };
         if (this.on('fluid')) {
-          // A vortex survives the pressure projection, so drops marble the paint around them.
-          const push = this.val('ink', 'push') * 1400 * (0.5 + this.val('fluid', 'force')) * (rnd() < 0.5 ? -1 : 1);
-          this.splats.push({ x: x / aspect + 0.5, y: y + 0.5, dx: push, dy: 0, r: (size * size * 0.05 + 0.002) * this.splatScale(), radial: true });
+          const r = Math.max(0.04, size * 0.5);
+          const force = 0.5 + (this.project!.fx.fluid.p.force as number);
+          // Push: a pressure source, so the drop shoves the fluid outward without spinning it.
+          const push = this.val('ink', 'push');
+          if (push > 0) this.sources.push({ x: x / aspect + 0.5, y: y + 0.5, r2: r * r * 0.35, s: push * 2.4 * force, age: 0, tau: 0.28 });
+          // Swirl: optional marbling vortex.
+          const curl = this.val('ink', 'curl');
+          if (curl > 0) {
+            const m = curl * 1400 * force * (rnd() < 0.5 ? -1 : 1);
+            this.splats.push({ x: x / aspect + 0.5, y: y + 0.5, dx: m, dy: 0, r: (size * size * 0.05 + 0.002) * this.splatScale(), radial: true });
+          }
         }
       }
       while (this.drops.length > MAX_DROPS) this.drops.shift();
@@ -515,7 +527,6 @@ export class Renderer {
     // Fluid stirring.
     if (this.on('fluid')) {
       const stir = project.fx.fluid.p.stir as number;
-      const force = this.val('fluid', 'force');
       // Stir: two slow "spoons" on smooth paths keep the fluid moving with no
       // sudden kicks. They use the set force (not its beat drive) and swell with loudness.
       if (stir > 0) {
@@ -533,13 +544,16 @@ export class Renderer {
         }
       }
       if (f.beatNow && project.fx.fluid.drive === 'beat') {
-        const a = rnd() * Math.PI * 2;
-        const m = 2500 * force * project.fx.fluid.depth;
-        this.splats.push({ x: 0.25 + rnd() * 0.5, y: 0.25 + rnd() * 0.5, dx: Math.cos(a) * m, dy: Math.sin(a) * m, r: 0.02 * this.splatScale(), radial: false });
+        // On the beat the fluid breathes out from a point near the middle.
+        const k = project.fx.fluid.depth * (project.fx.fluid.p.force as number);
+        if (k > 0) this.sources.push({ x: 0.35 + rnd() * 0.3, y: 0.35 + rnd() * 0.3, r2: 0.03, s: k * 1.6, age: 0, tau: 0.22 });
       }
       this.stepFluid(dt, aspect, project);
+      for (const so of this.sources) so.age += dt;
+      this.sources = this.sources.filter((so) => so.age < so.tau * 4);
     } else {
       this.splats.length = 0;
+      this.sources.length = 0;
     }
 
     // Beat shapes.
@@ -575,15 +589,9 @@ export class Renderer {
         while (this.shapes.length > 8) this.shapes.shift();
         const push = this.val('shapes', 'push');
         if (this.on('fluid') && push > 0) {
-          // Shove the fluid outward from the shape's edge, like a drop landing.
-          const r0 = Math.max(0.03, this.val('shapes', 'size') * 0.5);
-          const m = push * 1100 * (0.5 + (project.fx.fluid.p.force as number));
-          for (let k = 0; k < 6; k++) {
-            const a = (k / 6) * Math.PI * 2 + rnd() * 0.5;
-            const ux = Math.cos(a);
-            const uy = Math.sin(a);
-            this.splats.push({ x: (x + ux * r0) / aspect + 0.5, y: y + uy * r0 + 0.5, dx: ux * m, dy: uy * m, r: (r0 * r0 * 0.04 + 0.0015) * this.splatScale(), radial: false });
-          }
+          // Shove the fluid outward from the shape, like a drop landing.
+          const r0 = Math.max(0.04, this.val('shapes', 'size') * 0.5);
+          this.sources.push({ x: x / aspect + 0.5, y: y + 0.5, r2: r0 * r0 * 0.4, s: push * 2.4 * (0.5 + (project.fx.fluid.p.force as number)), age: 0, tau: 0.3 });
         }
       }
     }
@@ -751,7 +759,14 @@ export class Renderer {
     P.vort.use().tex('uVel', 0, this.vel.read.tex).tex('uCurl', 1, this.curl.tex).f('uTexel', ...texel).f('uStrength', swirl * 45).f('uDt', dt);
     this.draw(this.vel.write);
     this.vel.swap();
-    P.div.use().tex('uVel', 0, this.vel.read.tex).f('uTexel', ...texel);
+    const src = new Float32Array(32);
+    let nSrc = 0;
+    for (const so of this.sources) {
+      if (nSrc >= 8) break;
+      src.set([so.x, so.y, so.r2, so.s * Math.exp(-so.age / so.tau)], nSrc * 4);
+      nSrc++;
+    }
+    P.div.use().tex('uVel', 0, this.vel.read.tex).f('uTexel', ...texel).f('uAspect', aspect).i('uSrcCount', nSrc).v4('uSrc', src);
     this.draw(this.divergence);
     P.scale.use().tex('uTex', 0, this.pressure.read.tex).f('uScale', 0.8);
     this.draw(this.pressure.write);
@@ -765,9 +780,24 @@ export class Renderer {
     P.grad.use().tex('uP', 0, this.pressure.read.tex).tex('uVel', 1, this.vel.read.tex).f('uTexel', ...texel);
     this.draw(this.vel.write);
     this.vel.swap();
-    P.advVel.use().tex('uVel', 0, this.vel.read.tex).f('uTexel', ...texel).f('uDt', dt).f('uDissipation', 0.08 + visc * visc * 4);
+    P.advVel.use().tex('uVel', 0, this.vel.read.tex).f('uTexel', ...texel).f('uDt', dt).f('uDissipation', 0.06 + visc * 0.9 + (1 - Math.min(1, swirl * 2)) * 1.1);
     this.draw(this.vel.write);
     this.vel.swap();
+    // Low swirl also means motion dies down quickly: a push displaces the paint
+    // and settles instead of carrying on into jets and eddies.
+    // Viscosity: diffuse velocity (implicit, a few Jacobi steps) so thick
+    // fluid flows in smooth, laminar sheets instead of churning.
+    if (visc > 0.01) {
+      P.scale.use().tex('uTex', 0, this.vel.read.tex).f('uScale', 1);
+      this.draw(this.curl);
+      const alpha = visc * visc * 60 * dt;
+      P.visc.use().tex('uVel0', 1, this.curl.tex).f('uTexel', ...texel).f('uAlpha', alpha);
+      for (let i = 0; i < 6; i++) {
+        P.visc.tex('uVel', 0, this.vel.read.tex);
+        this.draw(this.vel.write);
+        this.vel.swap();
+      }
+    }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
@@ -846,12 +876,21 @@ export class Renderer {
 
     const dd = new Float32Array(MAX_DROPS * 4);
     const dc = new Float32Array(MAX_DROPS * 3);
+    const db = new Float32Array(MAX_DROPS * 4);
+    // Without the fluid, the paint pass does the pushing itself.
+    const inkPush = this.on('fluid') ? 0 : this.val('ink', 'push');
+    const blend = this.val('ink', 'blend');
     this.drops.forEach((d, i) => {
       const k = d.age / d.life;
-      const grow = 1 - Math.pow(1 - Math.min(1, k * 1.6), 3);
+      const g = Math.min(1, k * 1.6);
+      const grow = 1 - Math.pow(1 - g, 3);
       dd.set([d.x, d.y, d.r * (0.25 + grow * 0.75), Math.pow(1 - k, 1.5)], i * 4);
       dc.set(d.col, i * 3);
+      // Radial speed follows how fast the drop is still growing.
+      const growRate = g < 1 ? (3 * Math.pow(1 - g, 2) * 1.6 * 0.75 * d.r) / d.life : 0;
+      db.set([inkPush * growRate * 0.9, blend, 0, 0], i * 4);
     });
+    P.v4('uDropB', db);
     P.i('uDropCount', this.drops.length).v4('uDrops', dd).v3('uDropCol', dc).f('uInkP', this.val('ink', 'warp'), this.val('ink', 'soft'));
 
     const sa = new Float32Array(32);
